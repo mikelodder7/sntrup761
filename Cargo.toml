@@ -1,0 +1,61 @@
+[package]
+name = "sntrup761"
+version = "0.1.0"
+authors = ["Michael Lodder <redmike7@gmail.com>"]
+license = "MIT OR Apache-2.0"
+keywords = ["cryptography", "hashing", "NTRU", "post-quantum"]
+description = "Rust implementation of the Streamline NTRU Prime algorithm"
+repository = "https://github.com/mikelodder7/sntrup761"
+documentation = "https://docs.rs/crate/sntrup761"
+categories = ["algorithms", "cryptography"]
+readme = "README.md"
+edition = "2021"
+
+[features]
+default = []
+alloc = []
+std = []
+serde = ["dep:serdect"]
+
+[dependencies]
+rand = "0.10.0"
+rand_chacha = "0.10.0"
+sha2 = "0.10.0"
+subtle = "2"
+serdect = { version = "0.4", optional = true }
+thiserror = "2.0"
+zeroize = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+hex = "0.4"
+postcard = { version = "1", features = ["use-std"] }
+serde_json = "1"
+
+[[bench]]
+name = "mod"
+harness = false
+
+[lints.rust]
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+trivial_casts = "deny"
+trivial_numeric_casts = "deny"
+unsafe_code = "deny"
+unstable_features = "deny"
+unused_import_braces = "deny"
+unused_parens = "deny"
+unused_lifetimes = "deny"
+unused_qualifications = "deny"
+unused_extern_crates = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+cast_precision_loss = "warn"
+cast_possible_truncation = "warn"
+cast_possible_wrap = "warn"
+cast_sign_loss = "warn"
+checked_conversions = "warn"
+mod_module_files = "warn"
+panic = "warn"
+panic_in_result_fn = "warn"
