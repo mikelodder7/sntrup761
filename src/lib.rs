@@ -44,7 +44,6 @@
 //! - For more details, see the [NTRU Prime design page](https://ntruprime.cr.yp.to/).
 
 #![no_std]
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 #[cfg(all(feature = "alloc", not(feature = "std")))]
 extern crate alloc;
