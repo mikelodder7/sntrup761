@@ -139,10 +139,19 @@ pub(crate) fn decapsulate_inner(
     clippy::cast_possible_wrap
 )]
 fn weightw_mask(r: &[i8; P]) -> i32 {
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "avx2",
+        not(feature = "force-scalar")
+    ))]
     // SAFETY: AVX2 verified by cfg
     unsafe {
         return weightw_mask_avx2(r);
+    }
+    #[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+    // SAFETY: NEON is baseline on aarch64
+    unsafe {
+        return weightw_mask_neon(r);
     }
     #[allow(unreachable_code)]
     weightw_mask_scalar(r)
@@ -158,7 +167,11 @@ fn weightw_mask_scalar(r: &[i8; P]) -> i32 {
 }
 
 /// Count non-zero elements 32 at a time using AVX2.
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+#[cfg(all(
+    target_arch = "x86_64",
+    target_feature = "avx2",
+    not(feature = "force-scalar")
+))]
 #[target_feature(enable = "avx2")]
 #[allow(
     unsafe_code,
@@ -193,6 +206,37 @@ unsafe fn weightw_mask_avx2(r: &[i8; P]) -> i32 {
     int16_nonzero_mask((weight - W as i32) as i16)
 }
 
+/// Count non-zero elements 16 at a time using NEON.
+#[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+#[allow(
+    unsafe_code,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap
+)]
+unsafe fn weightw_mask_neon(r: &[i8; P]) -> i32 {
+    use core::arch::aarch64::*;
+    let ones = vdupq_n_s8(1);
+    let mut acc = vdupq_n_u8(0);
+    let mut i = 0usize;
+    while i + 16 <= P {
+        let v = vld1q_s8(r.as_ptr().add(i));
+        let masked = vreinterpretq_u8_s8(vandq_s8(v, ones));
+        acc = vaddq_u8(acc, masked);
+        i += 16;
+    }
+    // Progressive horizontal sum: u8 -> u16 -> u32 -> u64
+    let sum16 = vpaddlq_u8(acc);
+    let sum32 = vpaddlq_u16(sum16);
+    let sum64 = vpaddlq_u32(sum32);
+    let mut weight = (vgetq_lane_u64(sum64, 0) + vgetq_lane_u64(sum64, 1)) as i32;
+    // Handle remainder
+    while i < P {
+        weight += (r[i] & 1) as i32;
+        i += 1;
+    }
+    int16_nonzero_mask((weight - W as i32) as i16)
+}
+
 /// Constant-time: returns 0 if x == 0, -1 (0xFFFFFFFF) otherwise.
 #[allow(clippy::cast_sign_loss)]
 fn int16_nonzero_mask(x: i16) -> i32 {
@@ -206,10 +250,19 @@ fn int16_nonzero_mask(x: i16) -> i32 {
 /// Returns 0 if equal, -1 otherwise.
 #[allow(unsafe_code, clippy::cast_possible_wrap)]
 fn ciphertexts_diff_mask(a: &[u8], b: &[u8]) -> i32 {
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "avx2",
+        not(feature = "force-scalar")
+    ))]
     // SAFETY: AVX2 verified by cfg
     unsafe {
         return ciphertexts_diff_mask_avx2(a, b);
+    }
+    #[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+    // SAFETY: NEON is baseline on aarch64
+    unsafe {
+        return ciphertexts_diff_mask_neon(a, b);
     }
     #[allow(unreachable_code)]
     ciphertexts_diff_mask_scalar(a, b)
@@ -226,7 +279,11 @@ fn ciphertexts_diff_mask_scalar(a: &[u8], b: &[u8]) -> i32 {
 }
 
 /// XOR-accumulate 32 bytes at a time, then horizontal OR.
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+#[cfg(all(
+    target_arch = "x86_64",
+    target_feature = "avx2",
+    not(feature = "force-scalar")
+))]
 #[target_feature(enable = "avx2")]
 #[allow(unsafe_code, clippy::cast_possible_wrap, clippy::cast_sign_loss)]
 unsafe fn ciphertexts_diff_mask_avx2(a: &[u8], b: &[u8]) -> i32 {
@@ -245,6 +302,30 @@ unsafe fn ciphertexts_diff_mask_avx2(a: &[u8], b: &[u8]) -> i32 {
     // mask has 32 bits: bit i is 1 if byte i of acc == 0
     // If all bytes are zero (equal), mask == 0xFFFFFFFF
     let mut diff: u16 = if mask as u32 != 0xFFFFFFFF { 1 } else { 0 };
+    // Handle remainder
+    while i < len {
+        diff |= (a[i] ^ b[i]) as u16;
+        i += 1;
+    }
+    int16_nonzero_mask(diff as i16)
+}
+
+/// XOR-accumulate 16 bytes at a time, then horizontal OR.
+#[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+#[allow(unsafe_code, clippy::cast_possible_wrap, clippy::cast_sign_loss)]
+unsafe fn ciphertexts_diff_mask_neon(a: &[u8], b: &[u8]) -> i32 {
+    use core::arch::aarch64::*;
+    let len = a.len().min(b.len());
+    let mut acc = vdupq_n_u8(0);
+    let mut i = 0usize;
+    while i + 16 <= len {
+        let av = vld1q_u8(a.as_ptr().add(i));
+        let bv = vld1q_u8(b.as_ptr().add(i));
+        acc = vorrq_u8(acc, veorq_u8(av, bv));
+        i += 16;
+    }
+    // Horizontal max: any-nonzero check
+    let mut diff: u16 = vmaxvq_u8(acc) as u16;
     // Handle remainder
     while i < len {
         diff |= (a[i] ^ b[i]) as u16;

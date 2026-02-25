@@ -50,10 +50,19 @@ pub fn reciprocal(s: [i8; P]) -> (isize, [i8; P]) {
 
 #[allow(unsafe_code)]
 pub fn mult(h: &mut [i8; P], f: [i8; P], g: [i8; P]) {
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "avx2",
+        not(feature = "force-scalar")
+    ))]
     // SAFETY: AVX2 verified by cfg
     unsafe {
         return mult_avx2(h, &f, &g);
+    }
+    #[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+    // SAFETY: NEON is baseline on aarch64
+    unsafe {
+        return mult_neon(h, &f, &g);
     }
     #[allow(unreachable_code)]
     mult_scalar(h, &f, &g);
@@ -85,7 +94,11 @@ fn mult_scalar(h: &mut [i8; P], f: &[i8; P], g: &[i8; P]) {
 /// Column-major schoolbook multiplication with AVX2 for R3 polynomials.
 /// Uses _mm256_sign_epi16 for {-1,0,1} multiplication and i16 accumulators.
 /// Processes 16 coefficients per SIMD instruction.
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+#[cfg(all(
+    target_arch = "x86_64",
+    target_feature = "avx2",
+    not(feature = "force-scalar")
+))]
 #[target_feature(enable = "avx2")]
 #[allow(
     unsafe_code,
@@ -147,6 +160,80 @@ unsafe fn mult_avx2(h: &mut [i8; P], f: &[i8; P], g: &[i8; P]) {
         let packed = _mm256_permute4x64_epi64(_mm256_packs_epi16(r0, r1), 0xD8);
         _mm256_storeu_si256(fg8.as_mut_ptr().add(i) as *mut __m256i, packed);
         i += 32;
+    }
+    while i < FG_LEN {
+        fg8[i] = mod3::freeze(fg[i] as i32);
+        i += 1;
+    }
+
+    // Reduction: x^P ≡ x + 1 (mod x^P - x - 1)
+    for i in (P..(P * 2) - 1).rev() {
+        fg8[i - P] = mod3::freeze(fg8[i - P] as i32 + fg8[i] as i32);
+        fg8[i - P + 1] = mod3::freeze(fg8[i - P + 1] as i32 + fg8[i] as i32);
+    }
+    h[..P].copy_from_slice(&fg8[..P]);
+}
+
+/// Column-major schoolbook multiplication with NEON for R3 polynomials.
+/// Uses vmulq_s16 for {-1,0,1} multiplication and i16 accumulators.
+/// Processes 8 coefficients per SIMD instruction.
+#[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+#[allow(
+    unsafe_code,
+    clippy::cast_possible_truncation,
+    clippy::needless_range_loop
+)]
+unsafe fn mult_neon(h: &mut [i8; P], f: &[i8; P], g: &[i8; P]) {
+    use core::arch::aarch64::*;
+
+    const G_PAD: usize = (P + 7) & !7; // 768, multiple of 8
+    const FG_PAD: usize = P + G_PAD; // 1529 (>= 2P-1 = 1521)
+    const FG_LEN: usize = P * 2 - 1; // 1521
+
+    // Sign-extend g to i16, padded
+    let mut g_pad = [0i16; G_PAD];
+    for i in 0..P {
+        g_pad[i] = g[i] as i16;
+    }
+
+    // i16 accumulators (max value: ±761, fits in i16)
+    let mut fg = [0i16; FG_PAD];
+
+    // Column-major accumulation: fg[j+k] += f[j] * g[k]
+    // vmulq_s16(gk, fj): for fj in {-1,0,1} this produces correct signed product
+    for j in 0..P {
+        let fj = vdupq_n_s16(f[j] as i16);
+        let mut k = 0usize;
+        while k + 8 <= G_PAD {
+            let gk = vld1q_s16(g_pad.as_ptr().add(k));
+            let prod = vmulq_s16(gk, fj);
+            let acc = vld1q_s16(fg.as_ptr().add(j + k));
+            vst1q_s16(fg.as_mut_ptr().add(j + k), vaddq_s16(acc, prod));
+            k += 8;
+        }
+    }
+
+    // Vectorized mod-3 freeze: vqrdmulhq_s16(a, 10923) gives correct quotient
+    // for |a| <= 761.  Result: a - 3*q is in {-1, 0, 1}.
+    let k10923 = vdupq_n_s16(10923);
+    let three16 = vdupq_n_s16(3);
+
+    let mut fg8 = [0i8; FG_LEN];
+    let mut i = 0usize;
+    while i + 16 <= FG_LEN {
+        // Process 16 values: two batches of 8 i16 → 16 i8
+        let a0 = vld1q_s16(fg.as_ptr().add(i));
+        let q0 = vqrdmulhq_s16(a0, k10923);
+        let r0 = vsubq_s16(a0, vmulq_s16(q0, three16));
+
+        let a1 = vld1q_s16(fg.as_ptr().add(i + 8));
+        let q1 = vqrdmulhq_s16(a1, k10923);
+        let r1 = vsubq_s16(a1, vmulq_s16(q1, three16));
+
+        // Pack 8+8 i16 → 16 i8 (naturally ordered, no permute needed)
+        let packed = vcombine_s8(vqmovn_s16(r0), vqmovn_s16(r1));
+        vst1q_s8(fg8.as_mut_ptr().add(i), packed);
+        i += 16;
     }
     while i < FG_LEN {
         fg8[i] = mod3::freeze(fg[i] as i32);

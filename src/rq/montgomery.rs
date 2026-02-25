@@ -146,7 +146,11 @@ pub(crate) const fn primitive_root_512(q: i64) -> i64 {
 /// Montgomery multiplication (SIMD, 16 elements): a*b*R^{-1} mod q
 ///
 /// qinv_vec = broadcast(q^{-1} mod R), q_vec = broadcast(q)
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+#[cfg(all(
+    target_arch = "x86_64",
+    target_feature = "avx2",
+    not(feature = "force-scalar")
+))]
 #[inline(always)]
 pub(crate) unsafe fn montmul_x16(
     a: core::arch::x86_64::__m256i,
@@ -162,7 +166,11 @@ pub(crate) unsafe fn montmul_x16(
 }
 
 /// Reduce a value in [-q, q) to [0, q) range.
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+#[cfg(all(
+    target_arch = "x86_64",
+    target_feature = "avx2",
+    not(feature = "force-scalar")
+))]
 #[inline(always)]
 pub(crate) unsafe fn reduce_x16(
     a: core::arch::x86_64::__m256i,
@@ -174,7 +182,11 @@ pub(crate) unsafe fn reduce_x16(
 }
 
 /// Add two values modulo q, assuming inputs in [0, q).
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+#[cfg(all(
+    target_arch = "x86_64",
+    target_feature = "avx2",
+    not(feature = "force-scalar")
+))]
 #[inline(always)]
 pub(crate) unsafe fn addmod_x16(
     a: core::arch::x86_64::__m256i,
@@ -190,7 +202,11 @@ pub(crate) unsafe fn addmod_x16(
 }
 
 /// Subtract two values modulo q, assuming inputs in [0, q).
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+#[cfg(all(
+    target_arch = "x86_64",
+    target_feature = "avx2",
+    not(feature = "force-scalar")
+))]
 #[inline(always)]
 pub(crate) unsafe fn submod_x16(
     a: core::arch::x86_64::__m256i,
@@ -201,6 +217,81 @@ pub(crate) unsafe fn submod_x16(
     let diff = _mm256_sub_epi16(a, b);
     let mask = _mm256_srai_epi16(diff, 15);
     _mm256_add_epi16(diff, _mm256_and_si256(mask, q))
+}
+
+// -----------------------------------------------------------------------
+// NEON (aarch64) SIMD helpers — 8 elements at a time
+// -----------------------------------------------------------------------
+
+/// Emulate `_mm256_mulhi_epi16`: signed 16×16→32 high-half for 8 lanes.
+#[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+#[inline(always)]
+pub(crate) unsafe fn mulhi_s16(
+    a: core::arch::aarch64::int16x8_t,
+    b: core::arch::aarch64::int16x8_t,
+) -> core::arch::aarch64::int16x8_t {
+    use core::arch::aarch64::*;
+    // Multiply low and high halves → i32, then take high 16 bits
+    let lo32 = vmull_s16(vget_low_s16(a), vget_low_s16(b));
+    let hi32 = vmull_high_s16(a, b);
+    vcombine_s16(vshrn_n_s32(lo32, 16), vshrn_n_s32(hi32, 16))
+}
+
+/// Montgomery multiplication (SIMD, 8 elements): a*b*R^{-1} mod q
+#[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+#[inline(always)]
+pub(crate) unsafe fn montmul_x8(
+    a: core::arch::aarch64::int16x8_t,
+    b: core::arch::aarch64::int16x8_t,
+    qinv: core::arch::aarch64::int16x8_t,
+    q: core::arch::aarch64::int16x8_t,
+) -> core::arch::aarch64::int16x8_t {
+    use core::arch::aarch64::*;
+    let t_lo = vmulq_s16(a, b);
+    let t_hi = mulhi_s16(a, b);
+    let u = vmulq_s16(t_lo, qinv);
+    vsubq_s16(t_hi, mulhi_s16(u, q))
+}
+
+/// Reduce a value in [-q, q) to [0, q) range.
+#[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+#[inline(always)]
+pub(crate) unsafe fn reduce_x8(
+    a: core::arch::aarch64::int16x8_t,
+    q: core::arch::aarch64::int16x8_t,
+) -> core::arch::aarch64::int16x8_t {
+    use core::arch::aarch64::*;
+    let mask = vshrq_n_s16(a, 15); // all 1s if negative
+    vaddq_s16(a, vandq_s16(mask, q))
+}
+
+/// Add two values modulo q, assuming inputs in [0, q).
+#[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+#[inline(always)]
+pub(crate) unsafe fn addmod_x8(
+    a: core::arch::aarch64::int16x8_t,
+    b: core::arch::aarch64::int16x8_t,
+    q: core::arch::aarch64::int16x8_t,
+) -> core::arch::aarch64::int16x8_t {
+    use core::arch::aarch64::*;
+    let sum = vaddq_s16(a, b);
+    let t = vsubq_s16(sum, q);
+    let mask = vshrq_n_s16(t, 15);
+    vaddq_s16(t, vandq_s16(mask, q))
+}
+
+/// Subtract two values modulo q, assuming inputs in [0, q).
+#[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+#[inline(always)]
+pub(crate) unsafe fn submod_x8(
+    a: core::arch::aarch64::int16x8_t,
+    b: core::arch::aarch64::int16x8_t,
+    q: core::arch::aarch64::int16x8_t,
+) -> core::arch::aarch64::int16x8_t {
+    use core::arch::aarch64::*;
+    let diff = vsubq_s16(a, b);
+    let mask = vshrq_n_s16(diff, 15);
+    vaddq_s16(diff, vandq_s16(mask, q))
 }
 
 /// Scalar Montgomery multiplication: computes a*b*R^{-1} mod q.

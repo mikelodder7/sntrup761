@@ -19,7 +19,15 @@ fn smaller_mask(x: isize, y: isize) -> isize {
 
 #[allow(clippy::cast_possible_wrap)]
 pub fn reciprocal3(s: [i8; P]) -> [i16; P] {
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "avx2",
+        not(feature = "force-scalar")
+    ))]
+    {
+        return reciprocal3_mont(s);
+    }
+    #[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
     {
         return reciprocal3_mont(s);
     }
@@ -62,9 +70,15 @@ fn reciprocal3_scalar(s: [i8; P]) -> [i16; P] {
     r
 }
 
-/// Montgomery-domain reciprocal3: uses i16 Montgomery multiply (16-wide SIMD)
-/// instead of i32 Barrett (8-wide SIMD), doubling throughput for the inner loop.
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+/// Montgomery-domain reciprocal3: uses i16 Montgomery multiply (SIMD)
+/// instead of i32 Barrett, increasing throughput for the inner loop.
+#[cfg(all(
+    not(feature = "force-scalar"),
+    any(
+        all(target_arch = "x86_64", target_feature = "avx2"),
+        target_arch = "aarch64"
+    )
+))]
 #[allow(
     clippy::cast_possible_wrap,
     clippy::cast_possible_truncation,
@@ -165,10 +179,19 @@ pub fn round3(h: &mut [i16; P]) {
 
 #[allow(unsafe_code)]
 pub fn mult(h: &mut [i16; P], f: [i16; P], g: [i8; P]) {
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "avx2",
+        not(feature = "force-scalar")
+    ))]
     // SAFETY: AVX2 availability verified by cfg target_feature
     unsafe {
         return mult_avx2(h, &f, &g);
+    }
+    #[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+    // SAFETY: NEON is baseline on aarch64
+    unsafe {
+        return mult_neon(h, &f, &g);
     }
     #[allow(unreachable_code)]
     mult_scalar(h, &f, &g);
@@ -199,7 +222,11 @@ fn mult_scalar(h: &mut [i16; P], f: &[i16; P], g: &[i8; P]) {
 
 /// Column-major schoolbook multiplication with AVX2.
 /// Processes 8 i32 multiply-accumulates per SIMD instruction.
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+#[cfg(all(
+    target_arch = "x86_64",
+    target_feature = "avx2",
+    not(feature = "force-scalar")
+))]
 #[target_feature(enable = "avx2")]
 #[allow(
     unsafe_code,
@@ -263,6 +290,84 @@ unsafe fn mult_avx2(h: &mut [i16; P], f: &[i16; P], g: &[i8; P]) {
         let packed = _mm256_permute4x64_epi64(_mm256_packs_epi32(r0, r1), 0xD8);
         _mm256_storeu_si256(fg16.as_mut_ptr().add(i) as *mut __m256i, packed);
         i += 16;
+    }
+    while i < FG_LEN {
+        fg16[i] = modq::freeze(fg[i]);
+        i += 1;
+    }
+
+    // Reduction (scalar — sequential dependencies prevent vectorization)
+    for i in (P..(P * 2) - 1).rev() {
+        fg16[i - P] = modq::freeze(fg16[i - P] as i32 + fg16[i] as i32);
+        fg16[i - P + 1] = modq::freeze(fg16[i - P + 1] as i32 + fg16[i] as i32);
+    }
+    h[..P].copy_from_slice(&fg16[..P]);
+}
+
+/// Column-major schoolbook multiplication with NEON.
+/// Processes 4 i32 multiply-accumulates per SIMD instruction.
+#[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+#[allow(
+    unsafe_code,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::needless_range_loop
+)]
+unsafe fn mult_neon(h: &mut [i16; P], f: &[i16; P], g: &[i8; P]) {
+    use core::arch::aarch64::*;
+
+    // Pad to multiples of 4 so SIMD loops need no remainder handling
+    const G_PAD: usize = (P + 3) & !3; // 764
+    const FG_PAD: usize = P + G_PAD; // 1525 (>= 2P-1 = 1521)
+    const FG_LEN: usize = P * 2 - 1; // 1521
+
+    let mut g_pad = [0i8; G_PAD];
+    g_pad[..P].copy_from_slice(g);
+    let mut fg = [0i32; FG_PAD];
+
+    // Accumulate f[j]*g[k] into fg[j+k]
+    for j in 0..P {
+        let fj = vdupq_n_s32(f[j] as i32);
+        let mut k = 0usize;
+        while k + 4 <= G_PAD {
+            // Sign-extend 4 i8 -> i16 -> i32
+            let gb = vld1_s8(g_pad.as_ptr().add(k));
+            let g16 = vmovl_s8(gb);
+            let gk = vmovl_s16(vget_low_s16(g16));
+            let prod = vmulq_s32(fj, gk);
+            let acc = vld1q_s32(fg.as_ptr().add(j + k));
+            vst1q_s32(fg.as_mut_ptr().add(j + k), vaddq_s32(acc, prod));
+            k += 4;
+        }
+    }
+
+    // Vectorized Barrett freeze: i32 -> i16
+    let qv = vdupq_n_s32(crate::Q as i32);
+    let k228 = vdupq_n_s32(228);
+    let k58470 = vdupq_n_s32(58470);
+    let k134m = vdupq_n_s32(134_217_728);
+
+    let mut fg16 = [0i16; FG_LEN];
+    let mut i = 0usize;
+    while i + 8 <= FG_LEN {
+        // Process 8 values: two batches of 4 i32 → 8 i16
+        let a0 = vld1q_s32(fg.as_ptr().add(i));
+        let a1 = vld1q_s32(fg.as_ptr().add(i + 4));
+
+        let t = vshrq_n_s32(vmulq_s32(a0, k228), 20);
+        let b0 = vsubq_s32(a0, vmulq_s32(t, qv));
+        let t = vshrq_n_s32(vaddq_s32(vmulq_s32(b0, k58470), k134m), 28);
+        let r0 = vsubq_s32(b0, vmulq_s32(t, qv));
+
+        let t = vshrq_n_s32(vmulq_s32(a1, k228), 20);
+        let b1 = vsubq_s32(a1, vmulq_s32(t, qv));
+        let t = vshrq_n_s32(vaddq_s32(vmulq_s32(b1, k58470), k134m), 28);
+        let r1 = vsubq_s32(b1, vmulq_s32(t, qv));
+
+        // Pack 4+4 i32 -> 8 i16 (naturally ordered, no permute needed)
+        let packed = vcombine_s16(vmovn_s32(r0), vmovn_s32(r1));
+        vst1q_s16(fg16.as_mut_ptr().add(i), packed);
+        i += 8;
     }
     while i < FG_LEN {
         fg16[i] = modq::freeze(fg[i]);

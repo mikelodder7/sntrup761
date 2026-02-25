@@ -32,7 +32,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-      - run: cargo build --all-features
+      - run: cargo build --features std,alloc,serde
 
   test:
     runs-on: ubuntu-latest
@@ -41,7 +41,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-      - run: cargo test --all-features --benches --release
+      - run: cargo test --features std,alloc,serde --benches --release
 
   careful:
     runs-on: ubuntu-latest
@@ -52,7 +52,7 @@ jobs:
           toolchain: nightly
       - uses: cargo-bins/cargo-binstall@main
       - run: cargo binstall --no-confirm cargo-careful
-      - run: cargo careful test tests --all-features --release
+      - run: cargo careful test tests --features std,alloc,serde --release
 
   clippy:
     runs-on: ubuntu-latest
@@ -62,7 +62,7 @@ jobs:
         with:
           toolchain: stable
           components: clippy
-      - run: cargo clippy --all-features -- -D warnings
+      - run: cargo clippy --features std,alloc,serde -- -D warnings
 
   fmt:
     runs-on: ubuntu-latest
@@ -81,7 +81,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-      - run: cargo doc --all-features
+      - run: cargo doc --features std,alloc,serde
 
   deps:
     runs-on: ubuntu-latest

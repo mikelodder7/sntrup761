@@ -55,10 +55,19 @@ pub mod random {
 
     #[allow(unsafe_code)]
     pub fn sort(x: &mut [i32], n: usize) {
-        #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+        #[cfg(all(
+            target_arch = "x86_64",
+            target_feature = "avx2",
+            not(feature = "force-scalar")
+        ))]
         // SAFETY: AVX2 verified by cfg
         unsafe {
             return sort_avx2(x, n);
+        }
+        #[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+        // SAFETY: NEON is baseline on aarch64
+        unsafe {
+            return sort_neon(x, n);
         }
         #[allow(unreachable_code)]
         sort_scalar(x, n);
@@ -94,7 +103,11 @@ pub mod random {
 
     /// AVX2-accelerated Batcher bitonic sort.
     /// Uses _mm256_min/max_epi32 for 8 parallel comparators when stride >= 8.
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "avx2",
+        not(feature = "force-scalar")
+    ))]
     #[target_feature(enable = "avx2")]
     #[allow(unsafe_code)]
     unsafe fn sort_avx2(x: &mut [i32], n: usize) {
@@ -122,7 +135,11 @@ pub mod random {
 
     /// Process one pass of comparators: minmax(x[i+off0], x[i+off1])
     /// for all i in 0..(n-off1) where i & p_mask == 0.
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "avx2",
+        not(feature = "force-scalar")
+    ))]
     #[target_feature(enable = "avx2")]
     #[allow(unsafe_code)]
     unsafe fn minmax_pass_avx2(x: &mut [i32], n: usize, p_mask: usize, off0: usize, off1: usize) {
@@ -156,6 +173,73 @@ pub mod random {
                         j += 1;
                     }
                     i = block_end + p_mask; // skip the next block (i & p_mask != 0)
+                } else {
+                    i += 1;
+                }
+            }
+        } else {
+            // Small strides: scalar
+            for i in 0..end {
+                if i & p_mask == 0 {
+                    int32_minmax(x, i + off0, i + off1);
+                }
+            }
+        }
+    }
+
+    /// NEON-accelerated Batcher bitonic sort.
+    /// Uses vminq_s32/vmaxq_s32 for 4 parallel comparators when stride >= 4.
+    #[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+    #[allow(unsafe_code)]
+    unsafe fn sort_neon(x: &mut [i32], n: usize) {
+        if n < 2 {
+            return;
+        }
+        let mut top = 1;
+        while top < (n - top) {
+            top += top;
+        }
+        let mut p = top;
+        while p > 0 {
+            // First pass: comparators at stride p
+            minmax_pass_neon(x, n, p, 0, p);
+
+            // Sub-passes
+            let mut q = top;
+            while q > p {
+                minmax_pass_neon(x, n, p, p, q);
+                q >>= 1;
+            }
+            p >>= 1;
+        }
+    }
+
+    /// Process one pass of comparators with NEON.
+    #[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+    #[allow(unsafe_code)]
+    unsafe fn minmax_pass_neon(x: &mut [i32], n: usize, p_mask: usize, off0: usize, off1: usize) {
+        use core::arch::aarch64::*;
+
+        let end = n.saturating_sub(off1);
+        if p_mask >= 4 {
+            let mut i = 0;
+            while i < end {
+                if i & p_mask == 0 {
+                    let block_end = (i + p_mask).min(end);
+                    let mut j = i;
+                    while j + 4 <= block_end {
+                        let a = vld1q_s32(x.as_ptr().add(j + off0));
+                        let b = vld1q_s32(x.as_ptr().add(j + off1));
+                        vst1q_s32(x.as_mut_ptr().add(j + off0), vminq_s32(a, b));
+                        vst1q_s32(x.as_mut_ptr().add(j + off1), vmaxq_s32(a, b));
+                        j += 4;
+                    }
+                    // Scalar remainder for this block
+                    while j < block_end {
+                        int32_minmax(x, j + off0, j + off1);
+                        j += 1;
+                    }
+                    i = block_end + p_mask;
                 } else {
                     i += 1;
                 }
