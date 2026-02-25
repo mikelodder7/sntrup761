@@ -40,6 +40,7 @@ pub mod random {
 
     /// Branchless constant-time min/max swap (djbsort int32_minmax).
     /// Operates on a slice with two indices to avoid borrow issues.
+    #[inline(always)]
     #[allow(clippy::cast_possible_truncation)]
     fn int32_minmax(x: &mut [i32], i: usize, j: usize) {
         let ab = x[j] ^ x[i];
@@ -52,7 +53,18 @@ pub mod random {
         x[j] ^= c;
     }
 
+    #[allow(unsafe_code)]
     pub fn sort(x: &mut [i32], n: usize) {
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+        // SAFETY: AVX2 verified by cfg
+        unsafe {
+            return sort_avx2(x, n);
+        }
+        #[allow(unreachable_code)]
+        sort_scalar(x, n);
+    }
+
+    fn sort_scalar(x: &mut [i32], n: usize) {
         if n < 2 {
             return;
         }
@@ -77,6 +89,84 @@ pub mod random {
                 q >>= 1;
             }
             p >>= 1;
+        }
+    }
+
+    /// AVX2-accelerated Batcher bitonic sort.
+    /// Uses _mm256_min/max_epi32 for 8 parallel comparators when stride >= 8.
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    #[target_feature(enable = "avx2")]
+    #[allow(unsafe_code)]
+    unsafe fn sort_avx2(x: &mut [i32], n: usize) {
+        if n < 2 {
+            return;
+        }
+        let mut top = 1;
+        while top < (n - top) {
+            top += top;
+        }
+        let mut p = top;
+        while p > 0 {
+            // First pass: comparators at stride p
+            minmax_pass_avx2(x, n, p, 0, p);
+
+            // Sub-passes
+            let mut q = top;
+            while q > p {
+                minmax_pass_avx2(x, n, p, p, q);
+                q >>= 1;
+            }
+            p >>= 1;
+        }
+    }
+
+    /// Process one pass of comparators: minmax(x[i+off0], x[i+off1])
+    /// for all i in 0..(n-off1) where i & p_mask == 0.
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    #[target_feature(enable = "avx2")]
+    #[allow(unsafe_code)]
+    unsafe fn minmax_pass_avx2(x: &mut [i32], n: usize, p_mask: usize, off0: usize, off1: usize) {
+        use core::arch::x86_64::*;
+
+        let end = n.saturating_sub(off1);
+        if p_mask >= 8 {
+            // When p_mask >= 8, the condition i & p_mask == 0 selects contiguous
+            // blocks of p_mask elements. Process 8 at a time with SIMD.
+            let mut i = 0;
+            while i < end {
+                if i & p_mask == 0 {
+                    let block_end = (i + p_mask).min(end);
+                    let mut j = i;
+                    while j + 8 <= block_end {
+                        let a = _mm256_loadu_si256(x.as_ptr().add(j + off0) as *const __m256i);
+                        let b = _mm256_loadu_si256(x.as_ptr().add(j + off1) as *const __m256i);
+                        _mm256_storeu_si256(
+                            x.as_mut_ptr().add(j + off0) as *mut __m256i,
+                            _mm256_min_epi32(a, b),
+                        );
+                        _mm256_storeu_si256(
+                            x.as_mut_ptr().add(j + off1) as *mut __m256i,
+                            _mm256_max_epi32(a, b),
+                        );
+                        j += 8;
+                    }
+                    // Scalar remainder for this block
+                    while j < block_end {
+                        int32_minmax(x, j + off0, j + off1);
+                        j += 1;
+                    }
+                    i = block_end + p_mask; // skip the next block (i & p_mask != 0)
+                } else {
+                    i += 1;
+                }
+            }
+        } else {
+            // Small strides: scalar
+            for i in 0..end {
+                if i & p_mask == 0 {
+                    int32_minmax(x, i + off0, i + off1);
+                }
+            }
         }
     }
 

@@ -35,6 +35,7 @@ const MAX_M_STORAGE: usize = compute_m_storage(P); // 1525
 
 /// Constant-time divmod: *quotient = x / m, returns x % m.
 /// m must be > 0 and < 16384. Matches PQClean's two-step Barrett reduction.
+#[inline(always)]
 #[allow(clippy::cast_possible_truncation)]
 fn uint32_divmod_uint14(quotient: &mut u32, x: u32, m: u16) -> u16 {
     let m32 = m as u32;
@@ -56,6 +57,7 @@ fn uint32_divmod_uint14(quotient: &mut u32, x: u32, m: u16) -> u16 {
     r as u16
 }
 
+#[inline(always)]
 fn uint32_mod_uint14(x: u32, m: u16) -> u16 {
     let mut q = 0u32;
     uint32_divmod_uint14(&mut q, x, m)
@@ -239,8 +241,8 @@ fn decode_single(out: &mut [u16], s: &[u8], m: u16) {
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn rq_encode(f: &[i16; P]) -> [u8; PUBLIC_KEY_SIZE] {
     let mut r = [0u16; P];
-    for i in 0..P {
-        r[i] = (f[i] as i32 + 2295) as u16;
+    for (ri, &fi) in r.iter_mut().zip(f.iter()) {
+        *ri = (fi as i32 + 2295) as u16;
     }
     let mut m = [Q; P];
     let mut out = [0u8; PUBLIC_KEY_SIZE];
@@ -256,8 +258,8 @@ pub fn rq_decode(c: &[u8]) -> [i16; P] {
     s[..len].copy_from_slice(&c[..len]);
     decode(&mut r, &s, &m, P);
     let mut f = [0i16; P];
-    for i in 0..P {
-        f[i] = modq::freeze(r[i] as i32 - 2295);
+    for (fi, &ri) in f.iter_mut().zip(r.iter()) {
+        *fi = modq::freeze(ri as i32 - 2295);
     }
     f
 }
@@ -265,8 +267,8 @@ pub fn rq_decode(c: &[u8]) -> [i16; P] {
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn rounded_encode(f: &[i16; P]) -> [u8; ROUNDED_ENCODE_SIZE] {
     let mut r = [0u16; P];
-    for i in 0..P {
-        r[i] = (((f[i] as i32 + 2295) * 10923) >> 15) as u16;
+    for (ri, &fi) in r.iter_mut().zip(f.iter()) {
+        *ri = (((fi as i32 + 2295) * 10923) >> 15) as u16;
     }
     let mut m = [Q_ROUNDED; P];
     let mut out = [0u8; ROUNDED_ENCODE_SIZE];
@@ -282,8 +284,8 @@ pub fn rounded_decode(c: &[u8]) -> [i16; P] {
     s[..len].copy_from_slice(&c[..len]);
     decode(&mut r, &s, &m, P);
     let mut f = [0i16; P];
-    for i in 0..P {
-        f[i] = modq::freeze(r[i] as i32 * 3 - 2295);
+    for (fi, &ri) in f.iter_mut().zip(r.iter()) {
+        *fi = modq::freeze(ri as i32 * 3 - 2295);
     }
     f
 }

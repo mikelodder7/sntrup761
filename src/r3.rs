@@ -3,11 +3,13 @@ mod vector;
 
 use crate::P;
 
+#[inline(always)]
 fn swap_int(x: isize, y: isize, mask: isize) -> (isize, isize) {
     let t = mask & (x ^ y);
     (x ^ t, y ^ t)
 }
 
+#[inline(always)]
 fn smaller_mask(x: isize, y: isize) -> isize {
     (x - y) >> 31
 }
@@ -31,10 +33,8 @@ pub fn reciprocal(s: [i8; P]) -> (isize, [i8; P]) {
 
     for _ in 0..LOOPS {
         let c = mod3::quotient(g[P], f[P]);
-        vector::minus_product(&mut g, P + 1, &f, c);
-        vector::shift(&mut g, P + 1);
-        vector::minus_product(&mut v, LOOPS + 1, &u, c);
-        vector::shift(&mut v, LOOPS + 1);
+        vector::minus_product_shift(&mut g, P + 1, &f, c);
+        vector::minus_product_shift(&mut v, LOOPS + 1, &u, c);
         e -= 1;
         let m = smaller_mask(e, d) & mod3::mask_set(g[P]);
         let (e_tmp, d_tmp) = swap_int(e, d, m);
@@ -48,28 +48,115 @@ pub fn reciprocal(s: [i8; P]) -> (isize, [i8; P]) {
     (smaller_mask(0, d), r)
 }
 
+#[allow(unsafe_code)]
 pub fn mult(h: &mut [i8; P], f: [i8; P], g: [i8; P]) {
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    // SAFETY: AVX2 verified by cfg
+    unsafe {
+        return mult_avx2(h, &f, &g);
+    }
+    #[allow(unreachable_code)]
+    mult_scalar(h, &f, &g);
+}
+
+fn mult_scalar(h: &mut [i8; P], f: &[i8; P], g: &[i8; P]) {
     let mut fg = [0i8; P * 2 - 1];
     for i in 0..P {
-        let mut r = 0i8;
+        let mut r = 0i32;
         for j in 0..=i {
-            r = mod3::plus_product(r, f[j], g[i - j]);
+            r += f[j] as i32 * g[i - j] as i32;
         }
-        fg[i] = r;
+        fg[i] = mod3::freeze(r);
     }
     for i in P..(P * 2 - 1) {
-        let mut r = 0i8;
+        let mut r = 0i32;
         for j in (i - P + 1)..P {
-            r = mod3::plus_product(r, f[j], g[i - j])
+            r += f[j] as i32 * g[i - j] as i32;
         }
-        fg[i] = r;
+        fg[i] = mod3::freeze(r);
     }
     for i in (P..(P * 2) - 1).rev() {
-        let tmp1 = mod3::sum(fg[i - P], fg[i]);
-        fg[i - P] = tmp1;
-        let tmp2 = mod3::sum(fg[i - P + 1], fg[i]);
-        fg[i - P + 1] = tmp2;
+        fg[i - P] = mod3::freeze(fg[i - P] as i32 + fg[i] as i32);
+        fg[i - P + 1] = mod3::freeze(fg[i - P + 1] as i32 + fg[i] as i32);
+    }
+    h[..P].copy_from_slice(&fg[..P]);
+}
+
+/// Column-major schoolbook multiplication with AVX2 for R3 polynomials.
+/// Uses _mm256_sign_epi16 for {-1,0,1} multiplication and i16 accumulators.
+/// Processes 16 coefficients per SIMD instruction.
+#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+#[target_feature(enable = "avx2")]
+#[allow(
+    unsafe_code,
+    clippy::cast_possible_truncation,
+    clippy::needless_range_loop
+)]
+unsafe fn mult_avx2(h: &mut [i8; P], f: &[i8; P], g: &[i8; P]) {
+    use core::arch::x86_64::*;
+
+    const G_PAD: usize = (P + 15) & !15; // 768, multiple of 16
+    const FG_PAD: usize = P + G_PAD; // 1529 (>= 2P-1 = 1521)
+    const FG_LEN: usize = P * 2 - 1; // 1521
+
+    // Sign-extend g to i16, padded
+    let mut g_pad = [0i16; G_PAD];
+    for i in 0..P {
+        g_pad[i] = g[i] as i16;
     }
 
-    h[..P].clone_from_slice(&fg[..P]);
+    // i16 accumulators (max value: ±761, fits in i16)
+    let mut fg = [0i16; FG_PAD];
+
+    // Column-major accumulation: fg[j+k] += f[j] * g[k]
+    for j in 0..P {
+        let fj = _mm256_set1_epi16(f[j] as i16);
+        let mut k = 0usize;
+        while k + 16 <= G_PAD {
+            let gk = _mm256_loadu_si256(g_pad.as_ptr().add(k) as *const __m256i);
+            // sign_epi16: if fj>0 → gk, if fj==0 → 0, if fj<0 → -gk
+            let prod = _mm256_sign_epi16(gk, fj);
+            let acc = _mm256_loadu_si256(fg.as_ptr().add(j + k) as *const __m256i);
+            _mm256_storeu_si256(
+                fg.as_mut_ptr().add(j + k) as *mut __m256i,
+                _mm256_add_epi16(acc, prod),
+            );
+            k += 16;
+        }
+    }
+
+    // Vectorized mod-3 freeze: mulhrs(a, 10923) gives floor((a*10923+16384)/32768)
+    // which is the correct quotient for |a| <= 761.
+    // Result: a - 3*q is in {-1, 0, 1}.
+    let k10923 = _mm256_set1_epi16(10923);
+    let three16 = _mm256_set1_epi16(3);
+
+    let mut fg8 = [0i8; FG_LEN];
+    let mut i = 0usize;
+    while i + 32 <= FG_LEN {
+        // Process 32 values: two batches of 16 i16 → 32 i8
+        let a0 = _mm256_loadu_si256(fg.as_ptr().add(i) as *const __m256i);
+        let q0 = _mm256_mulhrs_epi16(a0, k10923);
+        let r0 = _mm256_sub_epi16(a0, _mm256_mullo_epi16(q0, three16));
+
+        let a1 = _mm256_loadu_si256(fg.as_ptr().add(i + 16) as *const __m256i);
+        let q1 = _mm256_mulhrs_epi16(a1, k10923);
+        let r1 = _mm256_sub_epi16(a1, _mm256_mullo_epi16(q1, three16));
+
+        // Pack 16+16 i16 → 32 i8, fix AVX2 lane ordering
+        let packed = _mm256_permute4x64_epi64(_mm256_packs_epi16(r0, r1), 0xD8);
+        _mm256_storeu_si256(fg8.as_mut_ptr().add(i) as *mut __m256i, packed);
+        i += 32;
+    }
+    while i < FG_LEN {
+        fg8[i] = mod3::freeze(fg[i] as i32);
+        i += 1;
+    }
+
+    // Reduction: x^P ≡ x + 1 (mod x^P - x - 1)
+    for i in (P..(P * 2) - 1).rev() {
+        fg8[i - P] = mod3::freeze(fg8[i - P] as i32 + fg8[i] as i32);
+        fg8[i - P + 1] = mod3::freeze(fg8[i - P + 1] as i32 + fg8[i] as i32);
+    }
+    h[..P].copy_from_slice(&fg8[..P]);
 }

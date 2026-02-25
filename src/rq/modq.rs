@@ -1,6 +1,7 @@
 #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
 const Q: i32 = crate::Q as i32;
 
+#[inline(always)]
 #[allow(clippy::cast_possible_truncation)]
 pub fn freeze(a: i32) -> i16 {
     let mut b = a;
@@ -9,15 +10,18 @@ pub fn freeze(a: i32) -> i16 {
     b as i16
 }
 
+#[inline(always)]
 pub fn product(a: i16, b: i16) -> i16 {
     freeze(a as i32 * b as i32)
 }
 
+#[inline(always)]
 pub fn square(a: i16) -> i16 {
     let a32 = a as i32;
     freeze(a32 * a32)
 }
 
+#[inline(always)]
 pub fn reciprocal(a1: i16) -> i16 {
     let a2 = square(a1);
     let a3 = product(a2, a1);
@@ -38,23 +42,18 @@ pub fn reciprocal(a1: i16) -> i16 {
     product(a4588, a1)
 }
 
+#[inline(always)]
 pub fn quotient(a: i16, b: i16) -> i16 {
     product(a, reciprocal(b))
 }
 
+#[inline(always)]
 pub fn minus_product(a: i16, b: i16, c: i16) -> i16 {
     freeze(a as i32 - (b as i32 * c as i32))
 }
 
-pub fn plus_product(a: i16, b: i16, c: i16) -> i16 {
-    freeze(a as i32 + (b as i32 * c as i32))
-}
-
-pub fn sum(a: i16, b: i16) -> i16 {
-    freeze(a as i32 + b as i32)
-}
-
 /// Constant-time: returns -1 if x != 0, 0 if x == 0.
+#[inline(always)]
 #[allow(clippy::cast_sign_loss)]
 pub fn mask_set(x: i16) -> isize {
     let mut r = (x as u16) as i32;
