@@ -205,7 +205,15 @@ Measured on Apple M1 (aarch64). The NEON column uses ARM NEON SIMD intrinsics th
 | Encapsulate  |            305 µs  |        102 µs  |   3.0×  |
 | Decapsulate  |            768 µs  |        186 µs  |   4.1×  |
 
-NEON optimizations are enabled automatically on `aarch64` targets. To force pure-Rust (scalar) code, enable the `force-scalar` feature.
+Measured on AMD Ryzen 9 5900HX (x86_64). The AVX2 column uses 256-bit SIMD intrinsics enabled by `target-cpu=native`; the scalar column uses the `force-scalar` feature to disable them.
+
+| Operation    | Scalar (pure Rust) | AVX2 (x86_64) | Speedup |
+|--------------|-------------------:|---------------:|--------:|
+| Key Gen      |          2,514 µs  |        756 µs  |   3.3×  |
+| Encapsulate  |            390 µs  |         56 µs  |   6.9×  |
+| Decapsulate  |          1,089 µs  |         93 µs  |  11.8×  |
+
+AVX2 optimizations are enabled automatically on `x86_64` when AVX2 is available. NEON optimizations are enabled automatically on `aarch64` targets. To force pure-Rust (scalar) code, enable the `force-scalar` feature.
 
 ## Security Properties
 
