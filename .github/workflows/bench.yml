@@ -33,9 +33,9 @@ jobs:
       - name: Test scalar paths
         run: cargo test --features force-scalar --release
       - name: Bench scalar baseline
-        run: cargo bench --release --features force-scalar -- --save-baseline scalar
+        run: cargo bench --bench mod --features force-scalar -- --save-baseline scalar
       - name: Bench SIMD vs scalar
-        run: cargo bench --release -- --baseline scalar
+        run: cargo bench --bench mod -- --baseline scalar
 
   bench-aarch64:
     runs-on: ubuntu-24.04-arm
@@ -47,9 +47,9 @@ jobs:
       - name: Test scalar paths
         run: cargo test --features force-scalar --release
       - name: Bench scalar baseline
-        run: cargo bench --release --features force-scalar -- --save-baseline scalar
+        run: cargo bench --bench mod --features force-scalar -- --save-baseline scalar
       - name: Bench NEON vs scalar
-        run: cargo bench --release -- --baseline scalar
+        run: cargo bench --bench mod -- --baseline scalar
 
   test-armv7:
     runs-on: ubuntu-latest

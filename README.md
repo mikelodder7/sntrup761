@@ -195,6 +195,18 @@ pub fn decapsulate(sk_bytes: &[u8], ct_bytes: &[u8]) -> Result<Vec<u8>, JsError>
 }
 ```
 
+## Benchmarks
+
+Measured on Apple M1 (aarch64). The NEON column uses ARM NEON SIMD intrinsics that are baseline on `aarch64`; the scalar column uses the `force-scalar` feature to disable them.
+
+| Operation    | Scalar (pure Rust) | NEON (aarch64) | Speedup |
+|--------------|-------------------:|---------------:|--------:|
+| Key Gen      |          2,858 µs  |      1,400 µs  |   2.0×  |
+| Encapsulate  |            305 µs  |        102 µs  |   3.0×  |
+| Decapsulate  |            768 µs  |        186 µs  |   4.1×  |
+
+NEON optimizations are enabled automatically on `aarch64` targets. To force pure-Rust (scalar) code, enable the `force-scalar` feature.
+
 ## Security Properties
 
 - **IND-CCA2 security** via implicit rejection: decapsulation always returns a shared key. On failure, a pseudorandom key is derived from secret randomness (`rho`), making it indistinguishable from a valid key to an attacker.
