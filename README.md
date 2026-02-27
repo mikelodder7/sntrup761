@@ -18,12 +18,18 @@ The algorithm was authored by Daniel J. Bernstein, Chitchanok Chuengsatiansup, T
 
 #### Sizes
 
-| Type        | Bytes |
-|-------------|------:|
-| Public Key  |  1158 |
-| Private Key |  1763 |
-| Ciphertext  |  1039 |
-| Shared Key  |    32 |
+Note that Streamlined NTRU Prime 761 sizes are fixed. All keys and ciphertexts use
+a canonical encoding which is enfored by the code i.e. it should not be feasible to
+modify the encoding of an existing public key or a ciphertext without changing is
+mathematical value.
+
+| Type                        | Bytes |
+|-----------------------------|------:|
+| Public Key                  |  1158 |
+| Private Key                 |  1763 |
+| Compressed Private Key      |    32 |
+| Ciphertext                  |  1039 |
+| Shared Key                  |    32 |
 
 ## Features
 
