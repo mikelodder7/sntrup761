@@ -1,4 +1,10 @@
 # sntrup761
+[![Crate][crate-image]][crate-link]
+[![Docs][docs-image]][docs-link]
+![Apache2/MIT licensed][license-image]
+[![Downloads][downloads-image]][crate-link]
+![build](https://github.com/mikelodder7/sntrup761/actions/workflows/sntrup.yml/badge.svg)
+![MSRV][msrv-image]
 
 A pure-Rust implementation of [Streamlined NTRU Prime](https://ntruprime.cr.yp.to/) 4591<sup>761</sup>.
 
@@ -253,3 +259,13 @@ Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in the work by you, as defined in the Apache-2.0
 license, shall be licensed as above, without any additional terms or
 conditions.
+
+[//]: # (badges)
+
+[crate-image]: https://img.shields.io/crates/v/sntrup761.svg
+[crate-link]: https://crates.io/crates/sntrup761
+[docs-image]: https://docs.rs/sntrup761/badge.svg
+[docs-link]: https://docs.rs/sntrup761/
+[license-image]: https://img.shields.io/badge/license-Apache2.0/MIT-blue.svg
+[downloads-image]: https://img.shields.io/crates/d/sntrup761.svg
+[msrv-image]: https://img.shields.io/badge/rustc-1.90+-blue.svg
