@@ -9,7 +9,7 @@ repository = "https://github.com/mikelodder7/sntrup761"
 documentation = "https://docs.rs/crate/sntrup761"
 categories = ["algorithms", "cryptography"]
 readme = "README.md"
-edition = "2021"
+edition = "2024"
 
 [features]
 default = []
@@ -22,12 +22,17 @@ js = ["getrandom/wasm_js"]
 [dependencies]
 rand = "0.10.0"
 rand_chacha = "0.10.0"
-sha2 = "0.10.0"
 subtle = "2"
 getrandom = { version = "0.4", optional = true }
 serdect = { version = "0.4", optional = true }
 thiserror = "2.0"
 zeroize = { version = "1", features = ["derive"] }
+
+[target.'cfg(any(target_arch = "aarch64", target_arch = "x86_64", target_arch = "x86"))'.dependencies]
+sha2 = { version = "0.10", features = ["asm"] }
+
+[target.'cfg(not(any(target_arch = "aarch64", target_arch = "x86_64", target_arch = "x86")))'.dependencies]
+sha2 = "0.10"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
@@ -44,7 +49,6 @@ missing_docs = "deny"
 missing_debug_implementations = "deny"
 trivial_casts = "deny"
 trivial_numeric_casts = "deny"
-unsafe_code = "warn"
 unstable_features = "deny"
 unused_import_braces = "deny"
 unused_parens = "deny"

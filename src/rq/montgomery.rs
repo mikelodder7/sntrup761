@@ -130,11 +130,7 @@ pub(crate) const fn from_mont(a: i16, q: i64) -> i16 {
     // result = (T - u * q) >> 16
     let r = (a32 - (u as i32) * q32) >> 16;
     // The result may be in [-q, q), reduce to [0, q)
-    if r < 0 {
-        (r + q32) as i16
-    } else {
-        r as i16
-    }
+    if r < 0 { (r + q32) as i16 } else { r as i16 }
 }
 
 /// Primitive 512th root of unity mod q (NOT in Montgomery form).
@@ -230,11 +226,13 @@ pub(crate) unsafe fn mulhi_s16(
     a: core::arch::aarch64::int16x8_t,
     b: core::arch::aarch64::int16x8_t,
 ) -> core::arch::aarch64::int16x8_t {
-    use core::arch::aarch64::*;
-    // Multiply low and high halves → i32, then take high 16 bits
-    let lo32 = vmull_s16(vget_low_s16(a), vget_low_s16(b));
-    let hi32 = vmull_high_s16(a, b);
-    vcombine_s16(vshrn_n_s32(lo32, 16), vshrn_n_s32(hi32, 16))
+    unsafe {
+        use core::arch::aarch64::*;
+        // Multiply low and high halves → i32, then take high 16 bits
+        let lo32 = vmull_s16(vget_low_s16(a), vget_low_s16(b));
+        let hi32 = vmull_high_s16(a, b);
+        vcombine_s16(vshrn_n_s32(lo32, 16), vshrn_n_s32(hi32, 16))
+    }
 }
 
 /// Montgomery multiplication (SIMD, 8 elements): a*b*R^{-1} mod q
@@ -246,11 +244,13 @@ pub(crate) unsafe fn montmul_x8(
     qinv: core::arch::aarch64::int16x8_t,
     q: core::arch::aarch64::int16x8_t,
 ) -> core::arch::aarch64::int16x8_t {
-    use core::arch::aarch64::*;
-    let t_lo = vmulq_s16(a, b);
-    let t_hi = mulhi_s16(a, b);
-    let u = vmulq_s16(t_lo, qinv);
-    vsubq_s16(t_hi, mulhi_s16(u, q))
+    unsafe {
+        use core::arch::aarch64::*;
+        let t_lo = vmulq_s16(a, b);
+        let t_hi = mulhi_s16(a, b);
+        let u = vmulq_s16(t_lo, qinv);
+        vsubq_s16(t_hi, mulhi_s16(u, q))
+    }
 }
 
 /// Reduce a value in [-q, q) to [0, q) range.
@@ -260,9 +260,11 @@ pub(crate) unsafe fn reduce_x8(
     a: core::arch::aarch64::int16x8_t,
     q: core::arch::aarch64::int16x8_t,
 ) -> core::arch::aarch64::int16x8_t {
-    use core::arch::aarch64::*;
-    let mask = vshrq_n_s16(a, 15); // all 1s if negative
-    vaddq_s16(a, vandq_s16(mask, q))
+    unsafe {
+        use core::arch::aarch64::*;
+        let mask = vshrq_n_s16(a, 15); // all 1s if negative
+        vaddq_s16(a, vandq_s16(mask, q))
+    }
 }
 
 /// Add two values modulo q, assuming inputs in [0, q).
@@ -273,11 +275,13 @@ pub(crate) unsafe fn addmod_x8(
     b: core::arch::aarch64::int16x8_t,
     q: core::arch::aarch64::int16x8_t,
 ) -> core::arch::aarch64::int16x8_t {
-    use core::arch::aarch64::*;
-    let sum = vaddq_s16(a, b);
-    let t = vsubq_s16(sum, q);
-    let mask = vshrq_n_s16(t, 15);
-    vaddq_s16(t, vandq_s16(mask, q))
+    unsafe {
+        use core::arch::aarch64::*;
+        let sum = vaddq_s16(a, b);
+        let t = vsubq_s16(sum, q);
+        let mask = vshrq_n_s16(t, 15);
+        vaddq_s16(t, vandq_s16(mask, q))
+    }
 }
 
 /// Subtract two values modulo q, assuming inputs in [0, q).
@@ -288,10 +292,12 @@ pub(crate) unsafe fn submod_x8(
     b: core::arch::aarch64::int16x8_t,
     q: core::arch::aarch64::int16x8_t,
 ) -> core::arch::aarch64::int16x8_t {
-    use core::arch::aarch64::*;
-    let diff = vsubq_s16(a, b);
-    let mask = vshrq_n_s16(diff, 15);
-    vaddq_s16(diff, vandq_s16(mask, q))
+    unsafe {
+        use core::arch::aarch64::*;
+        let diff = vsubq_s16(a, b);
+        let mask = vshrq_n_s16(diff, 15);
+        vaddq_s16(diff, vandq_s16(mask, q))
+    }
 }
 
 /// Scalar Montgomery multiplication: computes a*b*R^{-1} mod q.

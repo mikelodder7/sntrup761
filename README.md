@@ -203,13 +203,13 @@ pub fn decapsulate(sk_bytes: &[u8], ct_bytes: &[u8]) -> Result<Vec<u8>, JsError>
 
 ## Benchmarks
 
-Measured on Apple M1 (aarch64). The NEON column uses ARM NEON SIMD intrinsics that are baseline on `aarch64`; the scalar column uses the `force-scalar` feature to disable them.
+Measured on Apple M1 (aarch64). The NEON column uses ARM NEON SIMD intrinsics that are baseline on `aarch64`; the scalar column uses the `force-scalar` feature to disable them. SHA-2 hashing uses hardware intrinsics via `sha2-asm` on both aarch64 and x86_64.
 
 | Operation    | Scalar (pure Rust) | NEON (aarch64) | Speedup |
 |--------------|-------------------:|---------------:|--------:|
-| Key Gen      |          2,858 µs  |      1,400 µs  |   2.0×  |
-| Encapsulate  |            305 µs  |        102 µs  |   3.0×  |
-| Decapsulate  |            768 µs  |        186 µs  |   4.1×  |
+| Key Gen      |          2,850 µs  |      1,384 µs  |   2.1×  |
+| Encapsulate  |            301 µs  |         98 µs  |   3.1×  |
+| Decapsulate  |            762 µs  |        183 µs  |   4.2×  |
 
 Measured on AMD Ryzen 9 5900HX (x86_64). The AVX2 column uses 256-bit SIMD intrinsics enabled by `target-cpu=native`; the scalar column uses the `force-scalar` feature to disable them.
 

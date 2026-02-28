@@ -116,22 +116,14 @@ fn reciprocal3_mont(s: [i8; P]) -> [i16; P] {
             let a32 = g[P] as i32;
             let u = ((a32 as i16) as i32).wrapping_mul(qinv32) as i16;
             let r = (a32 - (u as i32) * q32) >> 16;
-            if r < 0 {
-                (r + q32) as i16
-            } else {
-                r as i16
-            }
+            if r < 0 { (r + q32) as i16 } else { r as i16 }
         };
         let g_std = modq::freeze(g_raw as i32);
         let f_raw = {
             let a32 = f[P] as i32;
             let u = ((a32 as i16) as i32).wrapping_mul(qinv32) as i16;
             let r = (a32 - (u as i32) * q32) >> 16;
-            if r < 0 {
-                (r + q32) as i16
-            } else {
-                r as i16
-            }
+            if r < 0 { (r + q32) as i16 } else { r as i16 }
         };
         let f_std = modq::freeze(f_raw as i32);
         let c = modq::quotient(g_std, f_std);
@@ -155,11 +147,7 @@ fn reciprocal3_mont(s: [i8; P]) -> [i16; P] {
         let a32 = f[P] as i32;
         let u = ((a32 as i16) as i32).wrapping_mul(qinv32) as i16;
         let r = (a32 - (u as i32) * q32) >> 16;
-        if r < 0 {
-            (r + q32) as i16
-        } else {
-            r as i16
-        }
+        if r < 0 { (r + q32) as i16 } else { r as i16 }
     };
     let f_std = modq::freeze(f_raw as i32);
     let rec = modq::reciprocal(f_std);
@@ -314,70 +302,72 @@ unsafe fn mult_avx2(h: &mut [i16; P], f: &[i16; P], g: &[i8; P]) {
     clippy::needless_range_loop
 )]
 unsafe fn mult_neon(h: &mut [i16; P], f: &[i16; P], g: &[i8; P]) {
-    use core::arch::aarch64::*;
+    unsafe {
+        use core::arch::aarch64::*;
 
-    // Pad to multiples of 4 so SIMD loops need no remainder handling
-    const G_PAD: usize = (P + 3) & !3; // 764
-    const FG_PAD: usize = P + G_PAD; // 1525 (>= 2P-1 = 1521)
-    const FG_LEN: usize = P * 2 - 1; // 1521
+        // Pad to multiples of 4 so SIMD loops need no remainder handling
+        const G_PAD: usize = (P + 3) & !3; // 764
+        const FG_PAD: usize = P + G_PAD; // 1525 (>= 2P-1 = 1521)
+        const FG_LEN: usize = P * 2 - 1; // 1521
 
-    let mut g_pad = [0i8; G_PAD];
-    g_pad[..P].copy_from_slice(g);
-    let mut fg = [0i32; FG_PAD];
+        let mut g_pad = [0i8; G_PAD];
+        g_pad[..P].copy_from_slice(g);
+        let mut fg = [0i32; FG_PAD];
 
-    // Accumulate f[j]*g[k] into fg[j+k]
-    for j in 0..P {
-        let fj = vdupq_n_s32(f[j] as i32);
-        let mut k = 0usize;
-        while k + 4 <= G_PAD {
-            // Sign-extend 4 i8 -> i16 -> i32
-            let gb = vld1_s8(g_pad.as_ptr().add(k));
-            let g16 = vmovl_s8(gb);
-            let gk = vmovl_s16(vget_low_s16(g16));
-            let prod = vmulq_s32(fj, gk);
-            let acc = vld1q_s32(fg.as_ptr().add(j + k));
-            vst1q_s32(fg.as_mut_ptr().add(j + k), vaddq_s32(acc, prod));
-            k += 4;
+        // Accumulate f[j]*g[k] into fg[j+k]
+        for j in 0..P {
+            let fj = vdupq_n_s32(f[j] as i32);
+            let mut k = 0usize;
+            while k + 4 <= G_PAD {
+                // Sign-extend 4 i8 -> i16 -> i32
+                let gb = vld1_s8(g_pad.as_ptr().add(k));
+                let g16 = vmovl_s8(gb);
+                let gk = vmovl_s16(vget_low_s16(g16));
+                let prod = vmulq_s32(fj, gk);
+                let acc = vld1q_s32(fg.as_ptr().add(j + k));
+                vst1q_s32(fg.as_mut_ptr().add(j + k), vaddq_s32(acc, prod));
+                k += 4;
+            }
         }
+
+        // Vectorized Barrett freeze: i32 -> i16
+        let qv = vdupq_n_s32(crate::Q as i32);
+        let k228 = vdupq_n_s32(228);
+        let k58470 = vdupq_n_s32(58470);
+        let k134m = vdupq_n_s32(134_217_728);
+
+        let mut fg16 = [0i16; FG_LEN];
+        let mut i = 0usize;
+        while i + 8 <= FG_LEN {
+            // Process 8 values: two batches of 4 i32 → 8 i16
+            let a0 = vld1q_s32(fg.as_ptr().add(i));
+            let a1 = vld1q_s32(fg.as_ptr().add(i + 4));
+
+            let t = vshrq_n_s32(vmulq_s32(a0, k228), 20);
+            let b0 = vsubq_s32(a0, vmulq_s32(t, qv));
+            let t = vshrq_n_s32(vaddq_s32(vmulq_s32(b0, k58470), k134m), 28);
+            let r0 = vsubq_s32(b0, vmulq_s32(t, qv));
+
+            let t = vshrq_n_s32(vmulq_s32(a1, k228), 20);
+            let b1 = vsubq_s32(a1, vmulq_s32(t, qv));
+            let t = vshrq_n_s32(vaddq_s32(vmulq_s32(b1, k58470), k134m), 28);
+            let r1 = vsubq_s32(b1, vmulq_s32(t, qv));
+
+            // Pack 4+4 i32 -> 8 i16 (naturally ordered, no permute needed)
+            let packed = vcombine_s16(vmovn_s32(r0), vmovn_s32(r1));
+            vst1q_s16(fg16.as_mut_ptr().add(i), packed);
+            i += 8;
+        }
+        while i < FG_LEN {
+            fg16[i] = modq::freeze(fg[i]);
+            i += 1;
+        }
+
+        // Reduction (scalar — sequential dependencies prevent vectorization)
+        for i in (P..(P * 2) - 1).rev() {
+            fg16[i - P] = modq::freeze(fg16[i - P] as i32 + fg16[i] as i32);
+            fg16[i - P + 1] = modq::freeze(fg16[i - P + 1] as i32 + fg16[i] as i32);
+        }
+        h[..P].copy_from_slice(&fg16[..P]);
     }
-
-    // Vectorized Barrett freeze: i32 -> i16
-    let qv = vdupq_n_s32(crate::Q as i32);
-    let k228 = vdupq_n_s32(228);
-    let k58470 = vdupq_n_s32(58470);
-    let k134m = vdupq_n_s32(134_217_728);
-
-    let mut fg16 = [0i16; FG_LEN];
-    let mut i = 0usize;
-    while i + 8 <= FG_LEN {
-        // Process 8 values: two batches of 4 i32 → 8 i16
-        let a0 = vld1q_s32(fg.as_ptr().add(i));
-        let a1 = vld1q_s32(fg.as_ptr().add(i + 4));
-
-        let t = vshrq_n_s32(vmulq_s32(a0, k228), 20);
-        let b0 = vsubq_s32(a0, vmulq_s32(t, qv));
-        let t = vshrq_n_s32(vaddq_s32(vmulq_s32(b0, k58470), k134m), 28);
-        let r0 = vsubq_s32(b0, vmulq_s32(t, qv));
-
-        let t = vshrq_n_s32(vmulq_s32(a1, k228), 20);
-        let b1 = vsubq_s32(a1, vmulq_s32(t, qv));
-        let t = vshrq_n_s32(vaddq_s32(vmulq_s32(b1, k58470), k134m), 28);
-        let r1 = vsubq_s32(b1, vmulq_s32(t, qv));
-
-        // Pack 4+4 i32 -> 8 i16 (naturally ordered, no permute needed)
-        let packed = vcombine_s16(vmovn_s32(r0), vmovn_s32(r1));
-        vst1q_s16(fg16.as_mut_ptr().add(i), packed);
-        i += 8;
-    }
-    while i < FG_LEN {
-        fg16[i] = modq::freeze(fg[i]);
-        i += 1;
-    }
-
-    // Reduction (scalar — sequential dependencies prevent vectorization)
-    for i in (P..(P * 2) - 1).rev() {
-        fg16[i - P] = modq::freeze(fg16[i - P] as i32 + fg16[i] as i32);
-        fg16[i - P + 1] = modq::freeze(fg16[i - P + 1] as i32 + fg16[i] as i32);
-    }
-    h[..P].copy_from_slice(&fg16[..P]);
 }

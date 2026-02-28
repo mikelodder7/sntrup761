@@ -1,6 +1,6 @@
 //! Benchmarks
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use sntrup761::*;
 
 fn key_gen_bench(c: &mut Criterion) {

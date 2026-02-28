@@ -520,109 +520,111 @@ unsafe fn intt512_avx2(
 
 #[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
 unsafe fn ntt512_neon(a: &mut [i16; N], twiddles: &[i16; LOG_N * (N / 2)], q_val: i64) {
-    use core::arch::aarch64::*;
+    unsafe {
+        use core::arch::aarch64::*;
 
-    bit_reverse_permutation(a);
+        bit_reverse_permutation(a);
 
-    let qv = vdupq_n_s16(q_val as i16);
-    let qinv = if q_val == P7681 {
-        vdupq_n_s16(QINV_7681)
-    } else {
-        vdupq_n_s16(QINV_10753)
-    };
-    let ones = vdupq_n_s16(1);
-    let qm1 = vsubq_s16(qv, ones);
-    let neg_q = vnegq_s16(qv);
-
-    for s in 0..LOG_N {
-        let half_len = 1usize << s;
-        let num_groups = N / (2 * half_len);
-        let base = s * (N / 2);
-
-        if half_len >= 8 {
-            // Process 8 butterflies at a time
-            for g in 0..num_groups {
-                let mut j = 0;
-                while j + 8 <= half_len {
-                    let tw = vld1q_s16(twiddles.as_ptr().add(base + g * half_len + j));
-                    let idx0 = g * (2 * half_len) + j;
-                    let idx1 = idx0 + half_len;
-
-                    let u = vld1q_s16(a.as_ptr().add(idx0));
-                    let v_raw = vld1q_s16(a.as_ptr().add(idx1));
-                    let v = montmul_x8(v_raw, tw, qinv, qv);
-
-                    let sum = vaddq_s16(u, v);
-                    let diff = vsubq_s16(u, v);
-
-                    // Signed reduction: (-2q, 2q) -> (-q, q)
-                    let mask = vcgtq_s16(sum, qm1);
-                    let sum = vsubq_s16(sum, vandq_s16(vreinterpretq_s16_u16(mask), qv));
-                    let mask = vcgtq_s16(neg_q, sum);
-                    let sum = vaddq_s16(sum, vandq_s16(vreinterpretq_s16_u16(mask), qv));
-
-                    let mask = vcgtq_s16(diff, qm1);
-                    let diff = vsubq_s16(diff, vandq_s16(vreinterpretq_s16_u16(mask), qv));
-                    let mask = vcgtq_s16(neg_q, diff);
-                    let diff = vaddq_s16(diff, vandq_s16(vreinterpretq_s16_u16(mask), qv));
-
-                    vst1q_s16(a.as_mut_ptr().add(idx0), sum);
-                    vst1q_s16(a.as_mut_ptr().add(idx1), diff);
-                    j += 8;
-                }
-                // Scalar remainder
-                let q32 = q_val as i32;
-                while j < half_len {
-                    let tw = twiddles[base + g * half_len + j];
-                    let idx0 = g * (2 * half_len) + j;
-                    let idx1 = idx0 + half_len;
-                    let u = a[idx0] as i32;
-                    let v = montmul_scalar(a[idx1], tw, q_val) as i32;
-                    let mut s0 = u + v;
-                    let mut s1 = u - v;
-                    if s0 >= q32 {
-                        s0 -= q32;
-                    }
-                    if s0 < -q32 {
-                        s0 += q32;
-                    }
-                    if s1 >= q32 {
-                        s1 -= q32;
-                    }
-                    if s1 < -q32 {
-                        s1 += q32;
-                    }
-                    a[idx0] = s0 as i16;
-                    a[idx1] = s1 as i16;
-                    j += 1;
-                }
-            }
+        let qv = vdupq_n_s16(q_val as i16);
+        let qinv = if q_val == P7681 {
+            vdupq_n_s16(QINV_7681)
         } else {
-            // Small stages: use scalar
-            let q32 = q_val as i32;
-            for g in 0..num_groups {
-                for j in 0..half_len {
-                    let tw = twiddles[base + g * half_len + j];
-                    let idx0 = g * (2 * half_len) + j;
-                    let idx1 = idx0 + half_len;
-                    let u = a[idx0] as i32;
-                    let v = montmul_scalar(a[idx1], tw, q_val) as i32;
-                    let mut s0 = u + v;
-                    let mut s1 = u - v;
-                    if s0 >= q32 {
-                        s0 -= q32;
+            vdupq_n_s16(QINV_10753)
+        };
+        let ones = vdupq_n_s16(1);
+        let qm1 = vsubq_s16(qv, ones);
+        let neg_q = vnegq_s16(qv);
+
+        for s in 0..LOG_N {
+            let half_len = 1usize << s;
+            let num_groups = N / (2 * half_len);
+            let base = s * (N / 2);
+
+            if half_len >= 8 {
+                // Process 8 butterflies at a time
+                for g in 0..num_groups {
+                    let mut j = 0;
+                    while j + 8 <= half_len {
+                        let tw = vld1q_s16(twiddles.as_ptr().add(base + g * half_len + j));
+                        let idx0 = g * (2 * half_len) + j;
+                        let idx1 = idx0 + half_len;
+
+                        let u = vld1q_s16(a.as_ptr().add(idx0));
+                        let v_raw = vld1q_s16(a.as_ptr().add(idx1));
+                        let v = montmul_x8(v_raw, tw, qinv, qv);
+
+                        let sum = vaddq_s16(u, v);
+                        let diff = vsubq_s16(u, v);
+
+                        // Signed reduction: (-2q, 2q) -> (-q, q)
+                        let mask = vcgtq_s16(sum, qm1);
+                        let sum = vsubq_s16(sum, vandq_s16(vreinterpretq_s16_u16(mask), qv));
+                        let mask = vcgtq_s16(neg_q, sum);
+                        let sum = vaddq_s16(sum, vandq_s16(vreinterpretq_s16_u16(mask), qv));
+
+                        let mask = vcgtq_s16(diff, qm1);
+                        let diff = vsubq_s16(diff, vandq_s16(vreinterpretq_s16_u16(mask), qv));
+                        let mask = vcgtq_s16(neg_q, diff);
+                        let diff = vaddq_s16(diff, vandq_s16(vreinterpretq_s16_u16(mask), qv));
+
+                        vst1q_s16(a.as_mut_ptr().add(idx0), sum);
+                        vst1q_s16(a.as_mut_ptr().add(idx1), diff);
+                        j += 8;
                     }
-                    if s0 < -q32 {
-                        s0 += q32;
+                    // Scalar remainder
+                    let q32 = q_val as i32;
+                    while j < half_len {
+                        let tw = twiddles[base + g * half_len + j];
+                        let idx0 = g * (2 * half_len) + j;
+                        let idx1 = idx0 + half_len;
+                        let u = a[idx0] as i32;
+                        let v = montmul_scalar(a[idx1], tw, q_val) as i32;
+                        let mut s0 = u + v;
+                        let mut s1 = u - v;
+                        if s0 >= q32 {
+                            s0 -= q32;
+                        }
+                        if s0 < -q32 {
+                            s0 += q32;
+                        }
+                        if s1 >= q32 {
+                            s1 -= q32;
+                        }
+                        if s1 < -q32 {
+                            s1 += q32;
+                        }
+                        a[idx0] = s0 as i16;
+                        a[idx1] = s1 as i16;
+                        j += 1;
                     }
-                    if s1 >= q32 {
-                        s1 -= q32;
+                }
+            } else {
+                // Small stages: use scalar
+                let q32 = q_val as i32;
+                for g in 0..num_groups {
+                    for j in 0..half_len {
+                        let tw = twiddles[base + g * half_len + j];
+                        let idx0 = g * (2 * half_len) + j;
+                        let idx1 = idx0 + half_len;
+                        let u = a[idx0] as i32;
+                        let v = montmul_scalar(a[idx1], tw, q_val) as i32;
+                        let mut s0 = u + v;
+                        let mut s1 = u - v;
+                        if s0 >= q32 {
+                            s0 -= q32;
+                        }
+                        if s0 < -q32 {
+                            s0 += q32;
+                        }
+                        if s1 >= q32 {
+                            s1 -= q32;
+                        }
+                        if s1 < -q32 {
+                            s1 += q32;
+                        }
+                        a[idx0] = s0 as i16;
+                        a[idx1] = s1 as i16;
                     }
-                    if s1 < -q32 {
-                        s1 += q32;
-                    }
-                    a[idx0] = s0 as i16;
-                    a[idx1] = s1 as i16;
                 }
             }
         }
@@ -636,136 +638,138 @@ unsafe fn intt512_neon(
     _ninv: i16,
     q_val: i64,
 ) {
-    use core::arch::aarch64::*;
+    unsafe {
+        use core::arch::aarch64::*;
 
-    let qv = vdupq_n_s16(q_val as i16);
-    let qinv = if q_val == P7681 {
-        vdupq_n_s16(QINV_7681)
-    } else {
-        vdupq_n_s16(QINV_10753)
-    };
-    let ones = vdupq_n_s16(1);
-    let qm1 = vsubq_s16(qv, ones);
-    let neg_q = vnegq_s16(qv);
-
-    for s in 0..LOG_N {
-        let half_len = 1 << (LOG_N - 1 - s);
-        let num_groups = N / (2 * half_len);
-        let base = s * (N / 2);
-
-        if half_len >= 8 {
-            for g in 0..num_groups {
-                let mut j = 0;
-                while j + 8 <= half_len {
-                    let tw = vld1q_s16(inv_twiddles.as_ptr().add(base + g * half_len + j));
-                    let idx0 = g * (2 * half_len) + j;
-                    let idx1 = idx0 + half_len;
-
-                    let u = vld1q_s16(a.as_ptr().add(idx0));
-                    let v = vld1q_s16(a.as_ptr().add(idx1));
-
-                    // DIF butterfly: a' = u + v, b' = (u - v) * tw
-                    let sum = vaddq_s16(u, v);
-                    let diff = vsubq_s16(u, v);
-
-                    // Reduce sum
-                    let mask = vcgtq_s16(sum, qm1);
-                    let sum = vsubq_s16(sum, vandq_s16(vreinterpretq_s16_u16(mask), qv));
-                    let mask = vcgtq_s16(neg_q, sum);
-                    let sum = vaddq_s16(sum, vandq_s16(vreinterpretq_s16_u16(mask), qv));
-
-                    // Reduce diff before montmul
-                    let mask = vcgtq_s16(diff, qm1);
-                    let diff = vsubq_s16(diff, vandq_s16(vreinterpretq_s16_u16(mask), qv));
-                    let mask = vcgtq_s16(neg_q, diff);
-                    let diff = vaddq_s16(diff, vandq_s16(vreinterpretq_s16_u16(mask), qv));
-
-                    vst1q_s16(a.as_mut_ptr().add(idx0), sum);
-                    vst1q_s16(a.as_mut_ptr().add(idx1), montmul_x8(diff, tw, qinv, qv));
-                    j += 8;
-                }
-                let q32 = q_val as i32;
-                while j < half_len {
-                    let tw = inv_twiddles[base + g * half_len + j];
-                    let idx0 = g * (2 * half_len) + j;
-                    let idx1 = idx0 + half_len;
-                    let u = a[idx0] as i32;
-                    let v = a[idx1] as i32;
-                    let mut s0 = u + v;
-                    if s0 >= q32 {
-                        s0 -= q32;
-                    }
-                    if s0 < -q32 {
-                        s0 += q32;
-                    }
-                    a[idx0] = s0 as i16;
-                    let mut d = u - v;
-                    if d >= q32 {
-                        d -= q32;
-                    }
-                    if d < -q32 {
-                        d += q32;
-                    }
-                    a[idx1] = montmul_scalar(d as i16, tw, q_val);
-                    j += 1;
-                }
-            }
+        let qv = vdupq_n_s16(q_val as i16);
+        let qinv = if q_val == P7681 {
+            vdupq_n_s16(QINV_7681)
         } else {
-            let q32 = q_val as i32;
-            for g in 0..num_groups {
-                for j in 0..half_len {
-                    let tw = inv_twiddles[base + g * half_len + j];
-                    let idx0 = g * (2 * half_len) + j;
-                    let idx1 = idx0 + half_len;
-                    let u = a[idx0] as i32;
-                    let v = a[idx1] as i32;
-                    let mut s0 = u + v;
-                    if s0 >= q32 {
-                        s0 -= q32;
+            vdupq_n_s16(QINV_10753)
+        };
+        let ones = vdupq_n_s16(1);
+        let qm1 = vsubq_s16(qv, ones);
+        let neg_q = vnegq_s16(qv);
+
+        for s in 0..LOG_N {
+            let half_len = 1 << (LOG_N - 1 - s);
+            let num_groups = N / (2 * half_len);
+            let base = s * (N / 2);
+
+            if half_len >= 8 {
+                for g in 0..num_groups {
+                    let mut j = 0;
+                    while j + 8 <= half_len {
+                        let tw = vld1q_s16(inv_twiddles.as_ptr().add(base + g * half_len + j));
+                        let idx0 = g * (2 * half_len) + j;
+                        let idx1 = idx0 + half_len;
+
+                        let u = vld1q_s16(a.as_ptr().add(idx0));
+                        let v = vld1q_s16(a.as_ptr().add(idx1));
+
+                        // DIF butterfly: a' = u + v, b' = (u - v) * tw
+                        let sum = vaddq_s16(u, v);
+                        let diff = vsubq_s16(u, v);
+
+                        // Reduce sum
+                        let mask = vcgtq_s16(sum, qm1);
+                        let sum = vsubq_s16(sum, vandq_s16(vreinterpretq_s16_u16(mask), qv));
+                        let mask = vcgtq_s16(neg_q, sum);
+                        let sum = vaddq_s16(sum, vandq_s16(vreinterpretq_s16_u16(mask), qv));
+
+                        // Reduce diff before montmul
+                        let mask = vcgtq_s16(diff, qm1);
+                        let diff = vsubq_s16(diff, vandq_s16(vreinterpretq_s16_u16(mask), qv));
+                        let mask = vcgtq_s16(neg_q, diff);
+                        let diff = vaddq_s16(diff, vandq_s16(vreinterpretq_s16_u16(mask), qv));
+
+                        vst1q_s16(a.as_mut_ptr().add(idx0), sum);
+                        vst1q_s16(a.as_mut_ptr().add(idx1), montmul_x8(diff, tw, qinv, qv));
+                        j += 8;
                     }
-                    if s0 < -q32 {
-                        s0 += q32;
+                    let q32 = q_val as i32;
+                    while j < half_len {
+                        let tw = inv_twiddles[base + g * half_len + j];
+                        let idx0 = g * (2 * half_len) + j;
+                        let idx1 = idx0 + half_len;
+                        let u = a[idx0] as i32;
+                        let v = a[idx1] as i32;
+                        let mut s0 = u + v;
+                        if s0 >= q32 {
+                            s0 -= q32;
+                        }
+                        if s0 < -q32 {
+                            s0 += q32;
+                        }
+                        a[idx0] = s0 as i16;
+                        let mut d = u - v;
+                        if d >= q32 {
+                            d -= q32;
+                        }
+                        if d < -q32 {
+                            d += q32;
+                        }
+                        a[idx1] = montmul_scalar(d as i16, tw, q_val);
+                        j += 1;
                     }
-                    a[idx0] = s0 as i16;
-                    let mut d = u - v;
-                    if d >= q32 {
-                        d -= q32;
+                }
+            } else {
+                let q32 = q_val as i32;
+                for g in 0..num_groups {
+                    for j in 0..half_len {
+                        let tw = inv_twiddles[base + g * half_len + j];
+                        let idx0 = g * (2 * half_len) + j;
+                        let idx1 = idx0 + half_len;
+                        let u = a[idx0] as i32;
+                        let v = a[idx1] as i32;
+                        let mut s0 = u + v;
+                        if s0 >= q32 {
+                            s0 -= q32;
+                        }
+                        if s0 < -q32 {
+                            s0 += q32;
+                        }
+                        a[idx0] = s0 as i16;
+                        let mut d = u - v;
+                        if d >= q32 {
+                            d -= q32;
+                        }
+                        if d < -q32 {
+                            d += q32;
+                        }
+                        a[idx1] = montmul_scalar(d as i16, tw, q_val);
                     }
-                    if d < -q32 {
-                        d += q32;
-                    }
-                    a[idx1] = montmul_scalar(d as i16, tw, q_val);
                 }
             }
         }
-    }
 
-    // Bit-reversal after DIF butterflies
-    bit_reverse_permutation(a);
+        // Bit-reversal after DIF butterflies
+        bit_reverse_permutation(a);
 
-    // Combined normalize (1/N) and de-Montgomeryize
-    let ninv_plain_v = if q_val == P7681 {
-        vdupq_n_s16(NINV_PLAIN_7681)
-    } else {
-        vdupq_n_s16(NINV_PLAIN_10753)
-    };
-    let mut i = 0;
-    while i + 8 <= N {
-        let val = vld1q_s16(a.as_ptr().add(i));
-        let plain = montmul_x8(val, ninv_plain_v, qinv, qv);
-        let plain = reduce_x8(plain, qv);
-        vst1q_s16(a.as_mut_ptr().add(i), plain);
-        i += 8;
-    }
-    let ninv_plain = if q_val == P7681 {
-        NINV_PLAIN_7681
-    } else {
-        NINV_PLAIN_10753
-    };
-    while i < N {
-        let plain = montmul_scalar(a[i], ninv_plain, q_val);
-        a[i] = mont_reduce(plain, q_val);
-        i += 1;
+        // Combined normalize (1/N) and de-Montgomeryize
+        let ninv_plain_v = if q_val == P7681 {
+            vdupq_n_s16(NINV_PLAIN_7681)
+        } else {
+            vdupq_n_s16(NINV_PLAIN_10753)
+        };
+        let mut i = 0;
+        while i + 8 <= N {
+            let val = vld1q_s16(a.as_ptr().add(i));
+            let plain = montmul_x8(val, ninv_plain_v, qinv, qv);
+            let plain = reduce_x8(plain, qv);
+            vst1q_s16(a.as_mut_ptr().add(i), plain);
+            i += 8;
+        }
+        let ninv_plain = if q_val == P7681 {
+            NINV_PLAIN_7681
+        } else {
+            NINV_PLAIN_10753
+        };
+        while i < N {
+            let plain = montmul_scalar(a[i], ninv_plain, q_val);
+            a[i] = mont_reduce(plain, q_val);
+            i += 1;
+        }
     }
 }
 

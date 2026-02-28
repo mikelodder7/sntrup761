@@ -2,9 +2,9 @@ use sha2::{Digest, Sha512};
 use zeroize::Zeroize;
 
 use crate::{
-    r3, rq, zx, Ciphertext, DecapsulationKey, EncapsulationKey, SharedSecret, CIPHERTEXT_SIZE, P,
-    PUBLIC_KEY_SIZE, ROUNDED_ENCODE_SIZE, SECRET_KEY_SIZE, SHARED_SECRET_SIZE, SMALL_ENCODE_SIZE,
-    W,
+    CIPHERTEXT_SIZE, Ciphertext, DecapsulationKey, EncapsulationKey, P, PUBLIC_KEY_SIZE,
+    ROUNDED_ENCODE_SIZE, SECRET_KEY_SIZE, SHARED_SECRET_SIZE, SMALL_ENCODE_SIZE, SharedSecret, W,
+    r3, rq, zx,
 };
 
 /// Hash prefix helper: SHA-512(prefix || input), truncated to 32 bytes.
@@ -214,27 +214,29 @@ unsafe fn weightw_mask_avx2(r: &[i8; P]) -> i32 {
     clippy::cast_possible_wrap
 )]
 unsafe fn weightw_mask_neon(r: &[i8; P]) -> i32 {
-    use core::arch::aarch64::*;
-    let ones = vdupq_n_s8(1);
-    let mut acc = vdupq_n_u8(0);
-    let mut i = 0usize;
-    while i + 16 <= P {
-        let v = vld1q_s8(r.as_ptr().add(i));
-        let masked = vreinterpretq_u8_s8(vandq_s8(v, ones));
-        acc = vaddq_u8(acc, masked);
-        i += 16;
+    unsafe {
+        use core::arch::aarch64::*;
+        let ones = vdupq_n_s8(1);
+        let mut acc = vdupq_n_u8(0);
+        let mut i = 0usize;
+        while i + 16 <= P {
+            let v = vld1q_s8(r.as_ptr().add(i));
+            let masked = vreinterpretq_u8_s8(vandq_s8(v, ones));
+            acc = vaddq_u8(acc, masked);
+            i += 16;
+        }
+        // Progressive horizontal sum: u8 -> u16 -> u32 -> u64
+        let sum16 = vpaddlq_u8(acc);
+        let sum32 = vpaddlq_u16(sum16);
+        let sum64 = vpaddlq_u32(sum32);
+        let mut weight = (vgetq_lane_u64(sum64, 0) + vgetq_lane_u64(sum64, 1)) as i32;
+        // Handle remainder
+        while i < P {
+            weight += (r[i] & 1) as i32;
+            i += 1;
+        }
+        int16_nonzero_mask((weight - W as i32) as i16)
     }
-    // Progressive horizontal sum: u8 -> u16 -> u32 -> u64
-    let sum16 = vpaddlq_u8(acc);
-    let sum32 = vpaddlq_u16(sum16);
-    let sum64 = vpaddlq_u32(sum32);
-    let mut weight = (vgetq_lane_u64(sum64, 0) + vgetq_lane_u64(sum64, 1)) as i32;
-    // Handle remainder
-    while i < P {
-        weight += (r[i] & 1) as i32;
-        i += 1;
-    }
-    int16_nonzero_mask((weight - W as i32) as i16)
 }
 
 /// Constant-time: returns 0 if x == 0, -1 (0xFFFFFFFF) otherwise.
@@ -314,24 +316,26 @@ unsafe fn ciphertexts_diff_mask_avx2(a: &[u8], b: &[u8]) -> i32 {
 #[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
 #[allow(unsafe_code, clippy::cast_possible_wrap, clippy::cast_sign_loss)]
 unsafe fn ciphertexts_diff_mask_neon(a: &[u8], b: &[u8]) -> i32 {
-    use core::arch::aarch64::*;
-    let len = a.len().min(b.len());
-    let mut acc = vdupq_n_u8(0);
-    let mut i = 0usize;
-    while i + 16 <= len {
-        let av = vld1q_u8(a.as_ptr().add(i));
-        let bv = vld1q_u8(b.as_ptr().add(i));
-        acc = vorrq_u8(acc, veorq_u8(av, bv));
-        i += 16;
+    unsafe {
+        use core::arch::aarch64::*;
+        let len = a.len().min(b.len());
+        let mut acc = vdupq_n_u8(0);
+        let mut i = 0usize;
+        while i + 16 <= len {
+            let av = vld1q_u8(a.as_ptr().add(i));
+            let bv = vld1q_u8(b.as_ptr().add(i));
+            acc = vorrq_u8(acc, veorq_u8(av, bv));
+            i += 16;
+        }
+        // Horizontal max: any-nonzero check
+        let mut diff: u16 = vmaxvq_u8(acc) as u16;
+        // Handle remainder
+        while i < len {
+            diff |= (a[i] ^ b[i]) as u16;
+            i += 1;
+        }
+        int16_nonzero_mask(diff as i16)
     }
-    // Horizontal max: any-nonzero check
-    let mut diff: u16 = vmaxvq_u8(acc) as u16;
-    // Handle remainder
-    while i < len {
-        diff |= (a[i] ^ b[i]) as u16;
-        i += 1;
-    }
-    int16_nonzero_mask(diff as i16)
 }
 
 pub(crate) fn derive_key(
