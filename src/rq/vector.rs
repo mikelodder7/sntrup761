@@ -575,7 +575,7 @@ mod tests {
         // Use wider (-q, q) range to simulate accumulated values after many iterations
         for n in [762usize, 1524] {
             for _ in 0..500 {
-                let mut z: Vec<i16> = (0..n).map(|_| rng.random_range(-4590i16..4591)).collect();
+                let z: Vec<i16> = (0..n).map(|_| rng.random_range(-4590i16..4591)).collect();
                 let y: Vec<i16> = (0..n).map(|_| rng.random_range(-4590i16..4591)).collect();
                 let c_mont: i16 = rng.random_range(-4590i16..4591);
 
