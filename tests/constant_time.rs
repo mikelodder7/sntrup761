@@ -175,6 +175,7 @@ fn make_seed(base: u8, index: usize) -> [u8; 32] {
 // Test 1: decap valid vs invalid (bit-flipped) ciphertexts
 // ---------------------------------------------------------------------------
 
+#[cfg(all(feature = "kgen", feature = "ecap", feature = "dcap"))]
 #[test]
 #[ignore]
 fn timing_decap_valid_vs_invalid() {
@@ -228,6 +229,7 @@ fn timing_decap_valid_vs_invalid() {
 // Test 2: decap valid vs garbage ciphertexts
 // ---------------------------------------------------------------------------
 
+#[cfg(all(feature = "kgen", feature = "ecap", feature = "dcap"))]
 #[test]
 #[ignore]
 fn timing_decap_valid_vs_garbage() {
@@ -276,6 +278,7 @@ fn timing_decap_valid_vs_garbage() {
 // Test 3: decap different valid ciphertexts (two seed groups)
 // ---------------------------------------------------------------------------
 
+#[cfg(all(feature = "kgen", feature = "ecap", feature = "dcap"))]
 #[test]
 #[ignore]
 fn timing_decap_different_valid() {
@@ -321,6 +324,7 @@ fn timing_decap_different_valid() {
 // Test 4: keygen different seeds
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "kgen")]
 #[test]
 #[ignore]
 fn timing_keygen_different_seeds() {
@@ -352,6 +356,7 @@ fn timing_keygen_different_seeds() {
 // Test 5: encap different seeds
 // ---------------------------------------------------------------------------
 
+#[cfg(all(feature = "kgen", feature = "ecap"))]
 #[test]
 #[ignore]
 fn timing_encap_different_seeds() {

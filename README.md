@@ -52,24 +52,32 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-sntrup761 = "0.2"
+sntrup761 = "0.4"
 ```
 
 ### Feature Flags
 
-All features are opt-in. Enable them in your `Cargo.toml`:
-
-```toml
-[dependencies]
-sntrup761 = { version = "0.2", features = ["std", "serde"] }
-```
+The KEM API is split into three default features so downstream crates can pull in only what they need:
 
 | Feature | Default | Description |
 |---------|:-------:|-------------|
+| `kgen`  | **yes** | Key generation: `generate_key`, `generate_key_from_seed`, `CompressedDecapsulationKey::{generate, expand}` |
+| `ecap`  | **yes** | Encapsulation: `EncapsulationKey::{encapsulate, encapsulate_deterministic}` |
+| `dcap`  | **yes** | Decapsulation: `DecapsulationKey::decapsulate`, `CompressedDecapsulationKey::decapsulate` |
 | `alloc` | no | Enables `TryFrom<Vec<u8>>` and `TryFrom<Box<[u8]>>` conversions (requires an allocator) |
 | `std`   | no | Enables standard library support (implies `alloc` functionality) |
 | `serde` | no | Enables `Serialize`/`Deserialize` for all key and ciphertext types (via `serdect` for constant-time hex encoding) |
 | `js`    | no | Enables WebAssembly support for `wasm32-unknown-unknown` by configuring `getrandom` to use JavaScript's `crypto.getRandomValues()` |
+
+All types (`EncapsulationKey`, `DecapsulationKey`, `Ciphertext`, `SharedSecret`, `CompressedDecapsulationKey`) and their byte conversions are always available regardless of feature flags.
+
+To use only a subset of the KEM API, disable defaults and pick the features you need:
+
+```toml
+[dependencies]
+# Decapsulation only (e.g. a receiver that never generates keys or encapsulates)
+sntrup761 = { version = "0.4", default-features = false, features = ["dcap"] }
+```
 
 ## Usage
 
@@ -140,7 +148,7 @@ assert!(ss == ss2);
 Enable the `serde` feature:
 
 ```toml
-sntrup761 = { version = "0.2", features = ["serde"] }
+sntrup761 = { version = "0.4", features = ["serde"] }
 ```
 
 Keys and ciphertexts serialize to hex in human-readable formats (JSON) and raw bytes in binary formats (postcard, bincode):
@@ -160,7 +168,7 @@ To compile for `wasm32-unknown-unknown`, enable the `js` feature so that `getran
 
 ```toml
 [dependencies]
-sntrup761 = { version = "0.2", features = ["js"] }
+sntrup761 = { version = "0.4", features = ["js"] }
 ```
 
 Install the target and build:

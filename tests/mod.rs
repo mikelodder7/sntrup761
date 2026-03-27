@@ -6,6 +6,7 @@ mod tests {
 
     use self::sntrup::*;
 
+    #[cfg(all(feature = "kgen", feature = "ecap", feature = "dcap"))]
     #[test]
     fn keygen_encap_decap_roundtrip() {
         for _ in 0..5 {
@@ -16,6 +17,7 @@ mod tests {
         }
     }
 
+    #[cfg(all(feature = "kgen", feature = "ecap", feature = "dcap"))]
     #[test]
     fn implicit_rejection() {
         // Decapsulation with corrupted ciphertext should still return a key
@@ -42,6 +44,7 @@ mod tests {
         );
     }
 
+    #[cfg(all(feature = "kgen", feature = "ecap", feature = "dcap"))]
     #[test]
     fn wrong_secret_key_gives_different_key() {
         let (pk1, _sk1) = generate_key(rand::rng());
@@ -51,6 +54,7 @@ mod tests {
         assert!(ss_encap != ss_decap, "wrong SK must produce different key");
     }
 
+    #[cfg(all(feature = "kgen", feature = "ecap", feature = "dcap"))]
     #[test]
     fn constant_time_decap_always_returns_key() {
         // Verify that decapsulate always returns SHARED_SECRET_SIZE bytes
@@ -65,6 +69,7 @@ mod tests {
         assert_eq!(result2.as_ref().len(), SHARED_SECRET_SIZE);
     }
 
+    #[cfg(feature = "kgen")]
     #[test]
     fn generate_key_from_seed_is_deterministic() {
         let seed = [0xABu8; 32];
@@ -78,6 +83,7 @@ mod tests {
         assert_ne!(pk1, pk3);
     }
 
+    #[cfg(feature = "dcap")]
     #[test]
     fn kat0_decapsulation() {
         // IETF draft-josefsson-ntruprime-streamlined-00, test vector 0
@@ -103,6 +109,7 @@ mod tests {
         assert_eq!(ss.as_ref(), &ss_expected[..], "KAT0 shared secret mismatch");
     }
 
+    #[cfg(feature = "dcap")]
     #[test]
     fn kat1_decapsulation() {
         // IETF draft-josefsson-ntruprime-streamlined-00, test vector 1
@@ -128,6 +135,7 @@ mod tests {
         assert_eq!(ss.as_ref(), &ss_expected[..], "KAT1 shared secret mismatch");
     }
 
+    #[cfg(all(feature = "kgen", feature = "ecap", feature = "dcap"))]
     #[test]
     fn encapsulation_key_from_decapsulation_key() {
         let (pk, sk) = generate_key(rand::rng());
@@ -140,6 +148,7 @@ mod tests {
         assert!(ss_encap == ss_decap, "shared secrets must match");
     }
 
+    #[cfg(all(feature = "kgen", feature = "ecap", feature = "dcap"))]
     #[test]
     fn compressed_decapsulation_key_roundtrip() {
         let csk = CompressedDecapsulationKey::generate(rand::rng());
@@ -165,6 +174,7 @@ mod tests {
         assert!(sk == sk2, "expand must be deterministic");
     }
 
+    #[cfg(feature = "kgen")]
     #[test]
     fn compressed_decapsulation_key_from_bytes() {
         let csk = CompressedDecapsulationKey::generate(rand::rng());
@@ -181,6 +191,7 @@ mod tests {
     mod serde_tests {
         use super::sntrup::*;
 
+        #[cfg(feature = "kgen")]
         #[test]
         fn json_roundtrip_encapsulation_key() {
             let (pk, _sk) = generate_key(rand::rng());
@@ -193,6 +204,7 @@ mod tests {
             assert_eq!(pk, pk2);
         }
 
+        #[cfg(feature = "kgen")]
         #[test]
         fn json_roundtrip_decapsulation_key() {
             let (_pk, sk) = generate_key(rand::rng());
@@ -201,6 +213,7 @@ mod tests {
             assert!(sk == sk2, "decapsulation keys must match");
         }
 
+        #[cfg(all(feature = "kgen", feature = "ecap"))]
         #[test]
         fn json_roundtrip_ciphertext() {
             let (pk, _sk) = generate_key(rand::rng());
@@ -213,6 +226,7 @@ mod tests {
             assert_eq!(ct, ct2);
         }
 
+        #[cfg(all(feature = "kgen", feature = "ecap"))]
         #[test]
         fn json_roundtrip_shared_secret() {
             let (pk, _sk) = generate_key(rand::rng());
@@ -225,6 +239,7 @@ mod tests {
             assert!(ss == ss2, "shared secrets must match");
         }
 
+        #[cfg(feature = "kgen")]
         #[test]
         fn postcard_roundtrip_encapsulation_key() {
             let (pk, _sk) = generate_key(rand::rng());
@@ -233,6 +248,7 @@ mod tests {
             assert_eq!(pk, pk2);
         }
 
+        #[cfg(feature = "kgen")]
         #[test]
         fn postcard_roundtrip_decapsulation_key() {
             let (_pk, sk) = generate_key(rand::rng());
@@ -241,6 +257,7 @@ mod tests {
             assert!(sk == sk2, "decapsulation keys must match");
         }
 
+        #[cfg(all(feature = "kgen", feature = "ecap"))]
         #[test]
         fn postcard_roundtrip_ciphertext() {
             let (pk, _sk) = generate_key(rand::rng());
@@ -250,6 +267,7 @@ mod tests {
             assert_eq!(ct, ct2);
         }
 
+        #[cfg(all(feature = "kgen", feature = "ecap"))]
         #[test]
         fn postcard_roundtrip_shared_secret() {
             let (pk, _sk) = generate_key(rand::rng());
@@ -267,6 +285,7 @@ mod tests {
             assert!(result.is_err());
         }
 
+        #[cfg(all(feature = "kgen", feature = "ecap", feature = "dcap"))]
         #[test]
         fn json_full_kem_roundtrip() {
             // Serialize all components, deserialize, and verify KEM still works

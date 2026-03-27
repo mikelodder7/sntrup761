@@ -43,6 +43,40 @@ jobs:
           toolchain: stable
       - run: cargo test --features std,alloc,serde --benches --release
 
+  feature-gates:
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: ""
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: no features
+            flags: "--no-default-features"
+          - name: kgen
+            flags: "--no-default-features --features kgen"
+          - name: ecap
+            flags: "--no-default-features --features ecap"
+          - name: dcap
+            flags: "--no-default-features --features dcap"
+          - name: kgen+ecap
+            flags: "--no-default-features --features kgen,ecap"
+          - name: kgen+dcap
+            flags: "--no-default-features --features kgen,dcap"
+          - name: ecap+dcap
+            flags: "--no-default-features --features ecap,dcap"
+          - name: kgen+ecap+dcap
+            flags: "--no-default-features --features kgen,ecap,dcap"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - name: Check (${{ matrix.name }})
+        run: cargo check ${{ matrix.flags }}
+      - name: Test (${{ matrix.name }})
+        run: cargo test ${{ matrix.flags }}
+
   careful:
     runs-on: ubuntu-latest
     steps:

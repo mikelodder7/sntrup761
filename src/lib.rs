@@ -71,6 +71,7 @@ mod zx;
 pub use error::Error;
 
 use core::fmt::{self, Debug, Formatter};
+#[cfg(any(feature = "kgen", feature = "ecap"))]
 use rand::{CryptoRng, SeedableRng};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -248,6 +249,7 @@ impl From<&DecapsulationKey> for EncapsulationKey {
     }
 }
 
+#[cfg(feature = "ecap")]
 impl EncapsulationKey {
     /// Encapsulates this public key.
     /// Returns a ciphertext and shared secret.
@@ -285,6 +287,7 @@ impl EncapsulationKey {
     }
 }
 
+#[cfg(feature = "dcap")]
 impl DecapsulationKey {
     /// Decapsulates ciphertext with this secret key.
     /// Always returns a shared secret (implicit rejection / IND-CCA2).
@@ -353,6 +356,7 @@ impl Debug for CompressedDecapsulationKey {
     }
 }
 
+#[cfg(feature = "kgen")]
 impl CompressedDecapsulationKey {
     /// Generates a random compressed decapsulation key.
     /// # Example
@@ -371,7 +375,10 @@ impl CompressedDecapsulationKey {
     pub fn expand(&self) -> (EncapsulationKey, DecapsulationKey) {
         generate_key_from_seed(self.0)
     }
+}
 
+#[cfg(all(feature = "kgen", feature = "dcap"))]
+impl CompressedDecapsulationKey {
     /// Convenience: expands the key and decapsulates in one step.
     ///
     /// This recomputes the full decapsulation key each time.
@@ -383,6 +390,7 @@ impl CompressedDecapsulationKey {
     }
 }
 
+#[cfg(feature = "kgen")]
 /// Generates a public and private keypair.
 /// # Example
 /// ```
@@ -415,6 +423,7 @@ pub fn generate_key(mut rng: impl CryptoRng) -> (EncapsulationKey, Decapsulation
     result
 }
 
+#[cfg(feature = "kgen")]
 /// Generates a deterministic keypair from a 32-byte seed.
 ///
 /// The same seed always produces the same keypair. Uses ChaCha20Rng
