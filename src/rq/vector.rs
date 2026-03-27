@@ -575,7 +575,7 @@ mod tests {
         // Use wider (-q, q) range to simulate accumulated values after many iterations
         for n in [762usize, 1524] {
             for _ in 0..500 {
-                let z: Vec<i16> = (0..n).map(|_| rng.random_range(-4590i16..4591)).collect();
+                let mut z: Vec<i16> = (0..n).map(|_| rng.random_range(-4590i16..4591)).collect();
                 let y: Vec<i16> = (0..n).map(|_| rng.random_range(-4590i16..4591)).collect();
                 let c_mont: i16 = rng.random_range(-4590i16..4591);
 
@@ -589,6 +589,11 @@ mod tests {
                 ))]
                 unsafe {
                     minus_product_shift_mont_avx2(&mut z, n, &y, c_mont);
+                }
+
+                #[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
+                unsafe {
+                    minus_product_shift_mont_neon(&mut z, n, &y, c_mont);
                 }
 
                 for i in 0..n {
